@@ -5,7 +5,7 @@ const { fetchChannelInfo } = require('../shared/youtube');
 // GET /api/channels - 등록된 채널 전체 목록 조회
 app.http('listChannels', {
   methods: ['GET'],
-  authLevel: 'function',
+  authLevel: 'anonymous',
   route: 'channels',
   handler: async (request, context) => {
     try {
@@ -21,7 +21,7 @@ app.http('listChannels', {
 // POST /api/channels - 새 채널 등록 { handle, category, language }
 app.http('addChannel', {
   methods: ['POST'],
-  authLevel: 'function',
+  authLevel: 'anonymous',
   route: 'channels',
   handler: async (request, context) => {
     try {
@@ -54,7 +54,7 @@ app.http('addChannel', {
 // DELETE /api/channels/{id}?category=xxx - 채널 삭제 (파티션 키가 category라 필요)
 app.http('deleteChannel', {
   methods: ['DELETE'],
-  authLevel: 'function',
+  authLevel: 'anonymous',
   route: 'channels/{id}',
   handler: async (request, context) => {
     try {

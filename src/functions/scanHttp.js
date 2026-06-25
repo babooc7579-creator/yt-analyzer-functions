@@ -3,7 +3,7 @@ const { runScan } = require('../shared/scanLogic');
 
 app.http('scanHttp', {
   methods: ['GET', 'POST'],
-  authLevel: 'function',
+  authLevel: 'anonymous',
   route: 'scan',
   handler: async (request, context) => {
     context.log('[수동 스캔] 요청 받음');
