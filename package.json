@@ -1,0 +1,14 @@
+{
+  "name": "yt-analyzer-functions",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/functions/*.js",
+  "scripts": {
+    "start": "func start",
+    "test": "node test/scanLogic.test.js"
+  },
+  "dependencies": {
+    "@azure/functions": "^4.5.1",
+    "@azure/cosmos": "^4.1.1"
+  }
+}
