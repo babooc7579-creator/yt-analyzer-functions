@@ -136,6 +136,8 @@ async function fetchChannelInfo(rawInput) {
 
   const item = data.items[0];
   const s = item.statistics || {};
+  const totalVideoCount = parseInt(s.videoCount || '0', 10);
+  const totalViewCount = parseInt(s.viewCount || '0', 10);
   return {
     id: item.id,
     title: item.snippet.title,
@@ -143,8 +145,9 @@ async function fetchChannelInfo(rawInput) {
     uploadsId: item.contentDetails.relatedPlaylists.uploads,
     stats: {
       subscriberCount: parseInt(s.subscriberCount || '0', 10),
-      totalVideoCount: parseInt(s.videoCount || '0', 10),
-      totalViewCount: parseInt(s.viewCount || '0', 10),
+      totalVideoCount,
+      totalViewCount,
+      avgViewCount: totalVideoCount > 0 ? Math.round(totalViewCount / totalVideoCount) : 0, // 평균 조회수 (전체÷영상수)
       channelCreatedAt: item.snippet.publishedAt?.substring(0, 10) || '',
       lastUpdatedAt: new Date().toISOString(),
     },
