@@ -6,9 +6,10 @@ app.http('scanHttp', {
   authLevel: 'anonymous',
   route: 'scan',
   handler: async (request, context) => {
-    context.log('[수동 스캔] 요청 받음');
+    const tag = request.query.get('tag') || null;
+    context.log(`[수동 스캔] 요청 받음${tag ? ` (태그: ${tag})` : ' (전체)'}`);
     try {
-      const results = await runScan();
+      const results = await runScan(tag ? { tag } : {});
       return { jsonBody: { success: true, results } };
     } catch (err) {
       context.error(`[수동 스캔] 오류: ${err.message}`);

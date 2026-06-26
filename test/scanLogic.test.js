@@ -1,6 +1,6 @@
 const assert = require('assert');
 const { daysSince, needsStatsRefresh } = require('../src/shared/scanLogic');
-const { parseDuration } = require('../src/shared/youtube');
+const { parseDuration, parseChannelInput } = require('../src/shared/youtube');
 
 function daysAgo(n) {
   const d = new Date();
@@ -40,3 +40,15 @@ assert.strictEqual(parseDuration('PT1M30S').isShorts, false, '1분 30초는 쇼�
 assert.strictEqual(parseDuration('PT10M').formatted, '10:00', '10분 포맷팅 확인');
 
 console.log('✅ 모든 테스트 통과! (daysSince, needsStatsRefresh, parseDuration 로직 정상)');
+
+// 7. parseChannelInput: 입력값 종류 자동 인식
+assert.deepStrictEqual(parseChannelInput('@핫하군'), { type: 'handle', value: '@핫하군' }, '핸들 그대로 인식');
+assert.deepStrictEqual(parseChannelInput('mkbhd'), { type: 'handle', value: 'mkbhd' }, '@없는 핸들도 인식');
+assert.deepStrictEqual(parseChannelInput('UCBJycsmduvYEL83R_U4JriQ'), { type: 'channelId', value: 'UCBJycsmduvYEL83R_U4JriQ' }, '채널ID(UC..) 인식');
+assert.deepStrictEqual(parseChannelInput('https://www.youtube.com/watch?v=dQw4w9WgXcQ'), { type: 'video', value: 'dQw4w9WgXcQ' }, 'watch 링크 -> 영상ID 추출');
+assert.deepStrictEqual(parseChannelInput('https://youtu.be/dQw4w9WgXcQ'), { type: 'video', value: 'dQw4w9WgXcQ' }, '단축 링크 -> 영상ID 추출');
+assert.deepStrictEqual(parseChannelInput('https://www.youtube.com/shorts/F4F1H7Js3T4'), { type: 'video', value: 'F4F1H7Js3T4' }, 'shorts 링크 -> 영상ID 추출');
+assert.deepStrictEqual(parseChannelInput('https://www.youtube.com/channel/UCBJycsmduvYEL83R_U4JriQ'), { type: 'channelId', value: 'UCBJycsmduvYEL83R_U4JriQ' }, '채널 링크 -> 채널ID 추출');
+assert.deepStrictEqual(parseChannelInput('https://www.youtube.com/@핫하군'), { type: 'handle', value: '@핫하군' }, '한글 핸들 채널 링크 인식');
+
+console.log('✅ URL 자동 인식 테스트도 전부 통과!');

@@ -1,5 +1,5 @@
 const { getVideosContainer, getChannelsContainer } = require('./cosmosClient');
-const { parseDuration, fetchPlaylistPage, fetchVideoStatsBatch } = require('./youtube');
+const { parseDuration, fetchPlaylistPage, fetchVideoStatsBatch, fetchChannelInfo } = require('./youtube');
 
 // === 갱신 정책 (API 호출 절약을 위한 핵심 규칙) ===
 const RECENT_DAYS_THRESHOLD = 90; // 최근 90일 이내 영상은 스캔할 때마다 매번 통계 갱신
@@ -82,8 +82,10 @@ async function applyStats(videos) {
       if (!video) continue;
       const viewCount = parseInt(statItem.statistics.viewCount || '0', 10);
       const likeCount = parseInt(statItem.statistics.likeCount || '0', 10);
+      const commentCount = parseInt(statItem.statistics.commentCount || '0', 10);
       video.viewCount = viewCount;
       video.likeCount = likeCount;
+      video.commentCount = commentCount;
       video.likeRatio = viewCount > 0 ? Number(((likeCount / viewCount) * 100).toFixed(1)) : 0;
       const durationInfo = parseDuration(statItem.contentDetails.duration);
       video.duration = durationInfo.formatted;
@@ -103,6 +105,12 @@ async function upsertVideos(videos) {
 
 // 채널 하나를 스캔: 신규 영상 발굴 + 효율적 통계 갱신 + 또터또 후보 탐지
 async function scanChannel(channel) {
+  // 채널 통계(구독자/영상수/전체조회수) 갱신 — API 호출 1회 추가
+  try {
+    const freshInfo = await fetchChannelInfo(channel.id);
+    channel.stats = freshInfo.stats;
+  } catch { /* 통계 갱신 실패해도 영상 스캔은 계속 진행 */ }
+
   const existingIds = await getExistingVideoIds(channel.id);
   const isFirstScan = existingIds.size === 0;
 
@@ -131,7 +139,7 @@ async function scanChannel(channel) {
   }));
   await upsertVideos(withMultiplier);
 
-  await getChannelsContainer().items.upsert({ ...channel, lastScannedAt: new Date().toISOString() });
+  await getChannelsContainer().items.upsert({ ...channel, stats: channel.stats, lastScannedAt: new Date().toISOString() });
 
   const ttoTtoCandidates = withMultiplier.filter(
     (v) => daysSince(v.uploadDate) >= TTOTTO_DAYS_THRESHOLD && v.multiplier >= TTOTTO_MULTIPLIER_THRESHOLD
@@ -148,9 +156,13 @@ async function scanChannel(channel) {
   };
 }
 
-// 등록된 모든 채널을 순서대로 스캔
-async function runScan() {
-  const { resources: channels } = await getChannelsContainer().items.readAll().fetchAll();
+// 등록된 채널을 순서대로 스캔. options.tag가 있으면 해당 태그의 채널만 스캔
+async function runScan(options = {}) {
+  const { resources: allChannels } = await getChannelsContainer().items.readAll().fetchAll();
+  const channels = options.tag
+    ? allChannels.filter((c) => Array.isArray(c.tags) && c.tags.includes(options.tag))
+    : allChannels;
+
   const results = [];
   for (const channel of channels) {
     try {

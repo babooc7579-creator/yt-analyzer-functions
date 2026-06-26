@@ -55,16 +55,76 @@ async function fetchVideoStatsBatch(videoIds) {
   return data.items || [];
 }
 
-// 채널 핸들/ID로 채널 기본 정보 조회 (채널 등록 시 사용)
-async function fetchChannelInfo(handleOrId) {
-  const apiKey = getApiKey();
-  const trimmed = handleOrId.trim();
-  const queryParam =
-    trimmed.startsWith('UC') && trimmed.length === 24
-      ? `id=${trimmed}`
-      : `forHandle=${trimmed.startsWith('@') ? trimmed : '@' + trimmed}`;
+// 사용자가 입력한 값이 무엇인지(영상 링크 / 채널 링크 / 핸들 / 채널ID) 자동으로 판별
+function parseChannelInput(rawInput) {
+  const input = rawInput.trim();
 
-  const url = `${API_BASE}/channels?part=snippet,contentDetails&${queryParam}&key=${apiKey}`;
+  try {
+    const url = new URL(input.startsWith('http') ? input : `https://${input}`);
+    const host = url.hostname.replace(/^www\./, '');
+
+    if (host === 'youtu.be') {
+      const videoId = url.pathname.replace('/', '');
+      if (videoId) return { type: 'video', value: videoId };
+    }
+
+    if (host.endsWith('youtube.com')) {
+      const path = decodeURIComponent(url.pathname);
+      if (path.startsWith('/watch')) {
+        const videoId = url.searchParams.get('v');
+        if (videoId) return { type: 'video', value: videoId };
+      }
+      if (path.startsWith('/shorts/')) {
+        const videoId = path.split('/shorts/')[1]?.split('/')[0];
+        if (videoId) return { type: 'video', value: videoId };
+      }
+      if (path.startsWith('/channel/')) {
+        const channelId = path.split('/channel/')[1]?.split('/')[0];
+        if (channelId) return { type: 'channelId', value: channelId };
+      }
+      if (path.startsWith('/@')) {
+        const handle = path.split('/')[1];
+        if (handle) return { type: 'handle', value: handle };
+      }
+    }
+  } catch {
+    // URL이 아니면 아래에서 일반 핸들/ID로 처리
+  }
+
+  if (input.startsWith('UC') && input.length === 24) {
+    return { type: 'channelId', value: input };
+  }
+  return { type: 'handle', value: input };
+}
+
+// 영상 ID로부터 그 영상이 속한 채널 ID를 알아냄
+async function fetchChannelIdFromVideo(videoId) {
+  const apiKey = getApiKey();
+  const url = `${API_BASE}/videos?part=snippet&id=${videoId}&key=${apiKey}`;
+  const res = await fetch(url);
+  const data = await res.json();
+  if (data.error) throw new Error(`YouTube API 오류 (videos): ${data.error.message}`);
+  if (!data.items || data.items.length === 0) throw new Error('해당 영상을 찾을 수 없습니다.');
+  return data.items[0].snippet.channelId;
+}
+
+// 채널 핸들/ID/채널링크/영상링크 - 무엇이든 받아서 채널 기본 정보를 조회 (채널 등록 시 사용)
+async function fetchChannelInfo(rawInput) {
+  const apiKey = getApiKey();
+  const parsed = parseChannelInput(rawInput);
+
+  let queryParam;
+  if (parsed.type === 'video') {
+    const channelId = await fetchChannelIdFromVideo(parsed.value);
+    queryParam = `id=${channelId}`;
+  } else if (parsed.type === 'channelId') {
+    queryParam = `id=${parsed.value}`;
+  } else {
+    const handle = parsed.value.startsWith('@') ? parsed.value : `@${parsed.value}`;
+    queryParam = `forHandle=${encodeURIComponent(handle)}`;
+  }
+
+  const url = `${API_BASE}/channels?part=snippet,contentDetails,statistics&${queryParam}&key=${apiKey}`;
   const res = await fetch(url);
   const data = await res.json();
   if (data.error) {
@@ -75,12 +135,20 @@ async function fetchChannelInfo(handleOrId) {
   }
 
   const item = data.items[0];
+  const s = item.statistics || {};
   return {
     id: item.id,
     title: item.snippet.title,
     thumbnail: item.snippet.thumbnails?.default?.url || '',
     uploadsId: item.contentDetails.relatedPlaylists.uploads,
+    stats: {
+      subscriberCount: parseInt(s.subscriberCount || '0', 10),
+      totalVideoCount: parseInt(s.videoCount || '0', 10),
+      totalViewCount: parseInt(s.viewCount || '0', 10),
+      channelCreatedAt: item.snippet.publishedAt?.substring(0, 10) || '',
+      lastUpdatedAt: new Date().toISOString(),
+    },
   };
 }
 
-module.exports = { parseDuration, fetchPlaylistPage, fetchVideoStatsBatch, fetchChannelInfo };
+module.exports = { parseDuration, fetchPlaylistPage, fetchVideoStatsBatch, fetchChannelInfo, parseChannelInput };
