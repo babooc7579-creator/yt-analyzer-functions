@@ -2,6 +2,28 @@ const { app } = require('@azure/functions');
 const { getChannelsContainer } = require('../shared/cosmosClient');
 const { fetchChannelInfo } = require('../shared/youtube');
 
+function withChannelOperationalDefaults(channel, now = new Date().toISOString()) {
+  const createdAt = channel.createdAt || now;
+  return {
+    ...channel,
+    grade: channel.grade ?? 'unclassified',
+    status: channel.status ?? 'active',
+    collectionMode: channel.collectionMode ?? 'manual',
+    scanIntervalHours: channel.scanIntervalHours ?? null,
+    nextScanAt: channel.nextScanAt ?? null,
+    latestVideoId: channel.latestVideoId ?? null,
+    latestVideoPublishedAt: channel.latestVideoPublishedAt ?? null,
+    backfillCursor: channel.backfillCursor ?? null,
+    hasMoreVideos: channel.hasMoreVideos ?? true,
+    backfillStatus: channel.backfillStatus ?? 'none',
+    errorCount: channel.errorCount ?? 0,
+    lastError: channel.lastError ?? null,
+    lastErrorAt: channel.lastErrorAt ?? null,
+    backoffUntil: channel.backoffUntil ?? null,
+    updatedAt: channel.updatedAt || createdAt || now,
+  };
+}
+
 // GET /api/channel-preview?handle=... - 저장하지 않고 채널 정보만 미리 조회
 app.http('previewChannel', {
   methods: ['GET'],
@@ -30,7 +52,7 @@ app.http('listChannels', {
   handler: async (request, context) => {
     try {
       const { resources } = await getChannelsContainer().items.readAll().fetchAll();
-      return { jsonBody: { success: true, channels: resources } };
+      return { jsonBody: { success: true, channels: resources.map((channel) => withChannelOperationalDefaults(channel)) } };
     } catch (err) {
       context.error(`[채널 조회] 오류: ${err.message}`);
       return { status: 500, jsonBody: { success: false, error: err.message } };
@@ -56,7 +78,8 @@ app.http('addChannel', {
       const initialNotes = note && note.trim() ? [{ date: new Date().toISOString(), text: note.trim() }] : [];
 
       const info = await fetchChannelInfo(handle);
-      const channelDoc = {
+      const now = new Date().toISOString();
+      const channelDoc = withChannelOperationalDefaults({
         id: info.id,
         title: info.title,
         thumbnail: info.thumbnail,
@@ -66,8 +89,8 @@ app.http('addChannel', {
         tags: cleanTags,
         language: language || 'KR',
         notes: initialNotes,
-        createdAt: new Date().toISOString(),
-      };
+        createdAt: now,
+      }, now);
 
       await getChannelsContainer().items.upsert(channelDoc);
       return { jsonBody: { success: true, channel: channelDoc } };
@@ -101,7 +124,8 @@ app.http('bulkAddChannels', {
         if (!handle) continue;
         try {
           const info = await fetchChannelInfo(handle);
-          const channelDoc = {
+          const now = new Date().toISOString();
+          const channelDoc = withChannelOperationalDefaults({
             id: info.id,
             title: info.title,
             thumbnail: info.thumbnail,
@@ -111,8 +135,8 @@ app.http('bulkAddChannels', {
             tags: cleanTags,
             language: language || 'KR',
             notes: [],
-            createdAt: new Date().toISOString(),
-          };
+            createdAt: now,
+          }, now);
           await container.items.upsert(channelDoc);
           results.push({ handle, success: true, channel: channelDoc });
         } catch (err) {
