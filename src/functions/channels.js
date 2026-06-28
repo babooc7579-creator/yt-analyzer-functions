@@ -24,6 +24,47 @@ function withChannelOperationalDefaults(channel, now = new Date().toISOString())
   };
 }
 
+const CHANNEL_OPERATION_FIELDS = [
+  'grade',
+  'status',
+  'collectionMode',
+  'scanIntervalHours',
+  'nextScanAt',
+  'latestVideoId',
+  'latestVideoPublishedAt',
+  'backfillCursor',
+  'hasMoreVideos',
+  'backfillStatus',
+  'errorCount',
+  'lastError',
+  'lastErrorAt',
+  'backoffUntil',
+  'notes',
+  'tags',
+  'category',
+  'language',
+];
+
+const CHANNEL_FIELD_VALUES = {
+  grade: ['S', 'A', 'B', 'C', 'D', 'F', 'discarded', 'unclassified'],
+  status: ['active', 'paused', 'archived'],
+  collectionMode: ['manual', 'auto', 'watch'],
+  backfillStatus: ['none', 'pending', 'running', 'done', 'failed'],
+};
+
+function applyChannelUpdates(channel, body, now = new Date().toISOString()) {
+  const updated = withChannelOperationalDefaults(channel, now);
+  for (const field of CHANNEL_OPERATION_FIELDS) {
+    if (body[field] === undefined) continue;
+    if (CHANNEL_FIELD_VALUES[field] && !CHANNEL_FIELD_VALUES[field].includes(body[field])) {
+      return { error: `${field} 값이 허용되지 않습니다.` };
+    }
+    updated[field] = body[field];
+  }
+  updated.updatedAt = now;
+  return { channel: updated };
+}
+
 // GET /api/channel-preview?handle=... - 저장하지 않고 채널 정보만 미리 조회
 app.http('previewChannel', {
   methods: ['GET'],
@@ -170,11 +211,13 @@ app.http('updateChannel', {
       if (!channel) return { status: 404, jsonBody: { success: false, error: '채널을 찾을 수 없습니다.' } };
 
       // 허용된 필드만 업데이트
-      if (body.tags !== undefined) channel.tags = Array.isArray(body.tags) ? body.tags : channel.tags;
-      if (body.language !== undefined) channel.language = body.language;
+      const result = applyChannelUpdates(channel, body);
+      if (result.error) {
+        return { status: 400, jsonBody: { success: false, error: result.error } };
+      }
 
-      await container.items.upsert(channel);
-      return { jsonBody: { success: true, channel } };
+      await container.items.upsert(result.channel);
+      return { jsonBody: { success: true, channel: result.channel } };
     } catch (err) {
       context.error(`[채널 수정] 오류: ${err.message}`);
       return { status: 500, jsonBody: { success: false, error: err.message } };
