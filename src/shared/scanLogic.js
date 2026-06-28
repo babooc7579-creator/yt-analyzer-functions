@@ -126,8 +126,43 @@ async function upsertVideos(videos) {
   }
 }
 
+function getChannelTotalVideos(channel) {
+  const value = channel.stats?.totalVideoCount ?? channel.stats?.videoCount ?? channel.totalVideoCount ?? 0;
+  const total = Number(value);
+  return Number.isFinite(total) && total > 0 ? total : 0;
+}
+
+function buildLastScanSummary(channel, options) {
+  const channelTotalVideos = getChannelTotalVideos(channel);
+  const savedVideosTotal = options.savedVideosTotal ?? 0;
+  const estimatedMissingVideos = Math.max(channelTotalVideos - savedVideosTotal, 0);
+  const coverageRate = channelTotalVideos > 0 ? Number(((savedVideosTotal / channelTotalVideos) * 100).toFixed(1)) : null;
+
+  return {
+    status: options.status || (estimatedMissingVideos > 0 ? 'partial' : 'success'),
+    scannedAt: options.scannedAt,
+    newVideosFound: options.newVideosFound ?? 0,
+    statsRefreshed: options.statsRefreshed ?? 0,
+    stoppedAtLatestVideoId: options.stoppedAtLatestVideoId ?? false,
+    savedVideosTotal,
+    channelTotalVideos,
+    estimatedMissingVideos,
+    coverageRate,
+    error: options.error || null,
+  };
+}
+
+async function saveChannelScanState(channel, state) {
+  try {
+    await getChannelsContainer().items.upsert({ ...channel, ...state });
+  } catch {
+    // Scan summary persistence should not turn a completed scan into a failed scan.
+  }
+}
+
 // 채널 하나를 스캔: 신규 영상 발굴 + 효율적 통계 갱신 + 또터또 후보 탐지
 async function scanChannel(channel) {
+  try {
   // 채널 통계(구독자/영상수/전체조회수) 갱신 — API 호출 1회 추가
   try {
     const freshInfo = await fetchChannelInfo(channel.id);
@@ -163,13 +198,20 @@ async function scanChannel(channel) {
   await upsertVideos(withMultiplier);
 
   const now = new Date().toISOString();
-  await getChannelsContainer().items.upsert({
-    ...channel,
+  const lastScanSummary = buildLastScanSummary(channel, {
+    scannedAt: now,
+    newVideosFound: newStubs.length,
+    statsRefreshed: toRefresh.length,
+    stoppedAtLatestVideoId,
+    savedVideosTotal: allVideos.length,
+  });
+  await saveChannelScanState(channel, {
     stats: channel.stats,
     latestVideoId: latestStub?.id || channel.latestVideoId || null,
     latestVideoPublishedAt: latestStub?.publishedAt || channel.latestVideoPublishedAt || null,
     lastScannedAt: now,
     updatedAt: now,
+    lastScanSummary,
   });
 
   const ttoTtoCandidates = withMultiplier.filter(
@@ -186,6 +228,16 @@ async function scanChannel(channel) {
     stoppedAtLatestVideoId,
     ttoTtoCandidates: ttoTtoCandidates.map((v) => ({ id: v.id, title: v.title, multiplier: v.multiplier })),
   };
+  } catch (err) {
+    const now = new Date().toISOString();
+    const lastScanSummary = buildLastScanSummary(channel, {
+      status: 'failed',
+      scannedAt: now,
+      error: err.message,
+    });
+    await saveChannelScanState(channel, { lastScanSummary, lastScannedAt: now, updatedAt: now });
+    throw err;
+  }
 }
 
 // 등록된 채널을 순서대로 스캔. options.tag가 있으면 해당 태그의 채널만 스캔
