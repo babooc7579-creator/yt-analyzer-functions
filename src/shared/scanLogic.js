@@ -49,13 +49,36 @@ async function getChannelVideosFromDb(channelId) {
 async function fetchVideoStubs(channel, isDeepFetch) {
   const stubs = [];
   let pageToken = '';
-  let pagesToFetch = isDeepFetch ? MAX_DEEP_FETCH_PAGES : 1;
+  const stopAtVideoId = isDeepFetch ? null : channel.latestVideoId || null;
+  const stopAfterPublishedAt = isDeepFetch ? null : channel.latestVideoPublishedAt || null;
+  let pagesToFetch = isDeepFetch || stopAtVideoId ? MAX_DEEP_FETCH_PAGES : 1;
+  let latestStub = null;
+  let stoppedAtLatestVideoId = false;
+  let shouldStop = false;
 
-  while (pagesToFetch > 0) {
+  while (pagesToFetch > 0 && !shouldStop) {
     const data = await fetchPlaylistPage(channel.uploadsId, pageToken);
     for (const item of data.items || []) {
+      const videoId = item.snippet.resourceId.videoId;
+      const publishedAt = item.snippet.publishedAt;
+
+      if (!latestStub) {
+        latestStub = { id: videoId, publishedAt };
+      }
+
+      if (stopAtVideoId && videoId === stopAtVideoId) {
+        stoppedAtLatestVideoId = true;
+        shouldStop = true;
+        break;
+      }
+
+      if (!stopAtVideoId && stopAfterPublishedAt && new Date(publishedAt) <= new Date(stopAfterPublishedAt)) {
+        shouldStop = true;
+        break;
+      }
+
       stubs.push({
-        id: item.snippet.resourceId.videoId,
+        id: videoId,
         channelId: channel.id,
         channelTitle: channel.title,
         language: channel.language,
@@ -66,9 +89,9 @@ async function fetchVideoStubs(channel, isDeepFetch) {
     }
     pageToken = data.nextPageToken || '';
     pagesToFetch--;
-    if (!pageToken) break;
+    if (!pageToken || shouldStop) break;
   }
-  return stubs;
+  return { stubs, latestStub, stoppedAtLatestVideoId };
 }
 
 // 영상 목록에 실제 조회수/좋아요/길이 통계를 채워넣음 (50개씩 배치 호출)
@@ -114,7 +137,7 @@ async function scanChannel(channel) {
   const existingIds = await getExistingVideoIds(channel.id);
   const isFirstScan = existingIds.size === 0;
 
-  const stubs = await fetchVideoStubs(channel, isFirstScan);
+  const { stubs, latestStub, stoppedAtLatestVideoId } = await fetchVideoStubs(channel, isFirstScan);
   const newStubs = stubs.filter((s) => !existingIds.has(s.id));
 
   let toRefresh = [...newStubs];
@@ -139,7 +162,15 @@ async function scanChannel(channel) {
   }));
   await upsertVideos(withMultiplier);
 
-  await getChannelsContainer().items.upsert({ ...channel, stats: channel.stats, lastScannedAt: new Date().toISOString() });
+  const now = new Date().toISOString();
+  await getChannelsContainer().items.upsert({
+    ...channel,
+    stats: channel.stats,
+    latestVideoId: latestStub?.id || channel.latestVideoId || null,
+    latestVideoPublishedAt: latestStub?.publishedAt || channel.latestVideoPublishedAt || null,
+    lastScannedAt: now,
+    updatedAt: now,
+  });
 
   const ttoTtoCandidates = withMultiplier.filter(
     (v) => daysSince(v.uploadDate) >= TTOTTO_DAYS_THRESHOLD && v.multiplier >= TTOTTO_MULTIPLIER_THRESHOLD
@@ -152,6 +183,7 @@ async function scanChannel(channel) {
     totalVideos: allVideos.length,
     newVideosFound: newStubs.length,
     statsRefreshed: toRefresh.length,
+    stoppedAtLatestVideoId,
     ttoTtoCandidates: ttoTtoCandidates.map((v) => ({ id: v.id, title: v.title, multiplier: v.multiplier })),
   };
 }
