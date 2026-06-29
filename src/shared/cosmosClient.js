@@ -1,7 +1,6 @@
 const { CosmosClient } = require('@azure/cosmos');
 
 let client;
-let scrapbookContainerPromise;
 
 function getClient() {
   if (!client) {
@@ -26,16 +25,8 @@ function getChannelsContainer() {
   return getDatabase().container('channels');
 }
 
-async function getScrapbookContainer() {
-  if (!scrapbookContainerPromise) {
-    scrapbookContainerPromise = getDatabase().containers
-      .createIfNotExists({
-        id: 'scrapbook',
-        partitionKey: { paths: ['/userId'] },
-      })
-      .then(({ container }) => container);
-  }
-  return scrapbookContainerPromise;
+function getScrapbookContainer() {
+  return getVideosContainer();
 }
 
 module.exports = { getClient, getDatabase, getVideosContainer, getChannelsContainer, getScrapbookContainer };
