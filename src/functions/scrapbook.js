@@ -2,6 +2,7 @@ const { app } = require('@azure/functions');
 const { getScrapbookContainer } = require('../shared/cosmosClient');
 
 const DEFAULT_USER_ID = 'default';
+const SCRAPBOOK_DOC_TYPE = 'scrapbook';
 
 function getUserId(request) {
   return request.query.get('userId') || DEFAULT_USER_ID;
@@ -15,14 +16,23 @@ function toScrapbookId(userId, videoId) {
   return `${userId}:${videoId}`;
 }
 
+function getScrapbookPartitionKey(userId) {
+  return `__scrapbook_${userId}`;
+}
+
 function toScrapbookDocument(video, userId, now = new Date().toISOString()) {
   const videoId = getVideoId(video);
-  if (!videoId) return { error: 'videoId가 필요합니다.' };
+  if (!videoId) return { error: 'videoId is required.' };
+  const partitionKey = getScrapbookPartitionKey(userId);
+  const sourceChannelId = video.sourceChannelId || video.channelId || video.channel_id || '';
 
   return {
     ...video,
     id: toScrapbookId(userId, videoId),
+    docType: SCRAPBOOK_DOC_TYPE,
     userId,
+    channelId: partitionKey,
+    sourceChannelId,
     videoId,
     savedAt: video.savedAt || now,
     updatedAt: now,
@@ -30,11 +40,13 @@ function toScrapbookDocument(video, userId, now = new Date().toISOString()) {
 }
 
 function toClientVideo(document) {
-  const { userId, updatedAt, ...video } = document;
+  const { docType, userId, channelId, sourceChannelId, updatedAt, ...video } = document;
+  if (sourceChannelId && !video.channelId) {
+    video.channelId = sourceChannelId;
+  }
   return video;
 }
 
-// GET /api/scrapbook - 저장된 스크랩 영상 목록 조회
 app.http('listScrapbook', {
   methods: ['GET'],
   authLevel: 'anonymous',
@@ -42,26 +54,29 @@ app.http('listScrapbook', {
   handler: async (request, context) => {
     try {
       const userId = getUserId(request);
+      const partitionKey = getScrapbookPartitionKey(userId);
       const container = await getScrapbookContainer();
       const { resources } = await container.items
         .query(
           {
-            query: 'SELECT * FROM c WHERE c.userId = @userId ORDER BY c.savedAt DESC',
-            parameters: [{ name: '@userId', value: userId }],
+            query: 'SELECT * FROM c WHERE c.docType = @docType AND c.userId = @userId ORDER BY c.savedAt DESC',
+            parameters: [
+              { name: '@docType', value: SCRAPBOOK_DOC_TYPE },
+              { name: '@userId', value: userId },
+            ],
           },
-          { partitionKey: userId }
+          { partitionKey }
         )
         .fetchAll();
 
       return { jsonBody: { success: true, videos: resources.map(toClientVideo) } };
     } catch (err) {
-      context.error(`[스크랩북 조회] 오류: ${err.message}`);
+      context.error(`[scrapbook list] error: ${err.message}`);
       return { status: 500, jsonBody: { success: false, error: err.message } };
     }
   },
 });
 
-// POST /api/scrapbook - 영상 하나 또는 여러 개 저장 { video } / { videos: [] }
 app.http('saveScrapbook', {
   methods: ['POST'],
   authLevel: 'anonymous',
@@ -69,6 +84,7 @@ app.http('saveScrapbook', {
   handler: async (request, context) => {
     try {
       const userId = getUserId(request);
+      const partitionKey = getScrapbookPartitionKey(userId);
       const body = await request.json();
       const videos = Array.isArray(body?.videos) ? body.videos : [body?.video || body];
       const container = await getScrapbookContainer();
@@ -80,19 +96,18 @@ app.http('saveScrapbook', {
         if (document.error) {
           return { status: 400, jsonBody: { success: false, error: document.error } };
         }
-        await container.items.upsert(document);
+        await container.items.upsert(document, { partitionKey });
         saved.push(toClientVideo(document));
       }
 
       return { jsonBody: { success: true, videos: saved, saved: saved.length } };
     } catch (err) {
-      context.error(`[스크랩북 저장] 오류: ${err.message}`);
+      context.error(`[scrapbook save] error: ${err.message}`);
       return { status: 500, jsonBody: { success: false, error: err.message } };
     }
   },
 });
 
-// DELETE /api/scrapbook/{videoId} - 스크랩 영상 삭제
 app.http('deleteScrapbookItem', {
   methods: ['DELETE'],
   authLevel: 'anonymous',
@@ -102,15 +117,15 @@ app.http('deleteScrapbookItem', {
       const userId = getUserId(request);
       const videoId = String(request.params.videoId || '').trim();
       if (!videoId) {
-        return { status: 400, jsonBody: { success: false, error: 'videoId가 필요합니다.' } };
+        return { status: 400, jsonBody: { success: false, error: 'videoId is required.' } };
       }
 
       const container = await getScrapbookContainer();
-      await container.item(toScrapbookId(userId, videoId), userId).delete();
+      await container.item(toScrapbookId(userId, videoId), getScrapbookPartitionKey(userId)).delete();
       return { jsonBody: { success: true, videoId } };
     } catch (err) {
       if (err.code === 404) return { jsonBody: { success: true } };
-      context.error(`[스크랩북 삭제] 오류: ${err.message}`);
+      context.error(`[scrapbook delete] error: ${err.message}`);
       return { status: 500, jsonBody: { success: false, error: err.message } };
     }
   },
