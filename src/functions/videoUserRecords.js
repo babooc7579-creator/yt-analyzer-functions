@@ -34,7 +34,9 @@ function toRecordDocument(record, userId, now = new Date().toISOString()) {
     channelId: partitionKey,
     videoId,
     status: record.status || 'new',
+    draftTitle: record.draftTitle || '',
     note: record.note || '',
+    targetPublishDate: record.targetPublishDate || '',
     createdAt: record.createdAt || now,
     updatedAt: now,
   };
