@@ -46,8 +46,8 @@ const CHANNEL_OPERATION_FIELDS = [
 ];
 
 const CHANNEL_FIELD_VALUES = {
-  grade: ['S', 'A', 'B', 'C', 'D', 'F', 'discarded', 'unclassified'],
-  status: ['active', 'paused', 'archived'],
+  grade: ['S', 'A', 'B', 'C', 'unclassified'],
+  status: ['active', 'paused', 'discarded'],
   collectionMode: ['manual', 'auto', 'watch'],
   backfillStatus: ['none', 'pending', 'running', 'done', 'failed'],
 };
