@@ -8,6 +8,11 @@ const MAX_DEEP_FETCH_PAGES = 5; // 채널 최초 수집 시 최대 250개(50개 
 const TTOTTO_DAYS_THRESHOLD = 180; // '또터또' 후보 기준: 6개월 이상
 const TTOTTO_MULTIPLIER_THRESHOLD = 3; // '또터또' 후보 기준: 채널 평균 대비 3배 이상
 
+const ACTIVE_CHANNEL_STATUS = 'active';
+const isChannelScannable = (channel = {}) => (
+  (channel.status || ACTIVE_CHANNEL_STATUS) === ACTIVE_CHANNEL_STATUS
+);
+
 function daysSince(dateStr) {
   const today = new Date();
   const target = new Date(dateStr);
@@ -243,9 +248,10 @@ async function scanChannel(channel) {
 // 등록된 채널을 순서대로 스캔. options.tag가 있으면 해당 태그의 채널만 스캔
 async function runScan(options = {}) {
   const { resources: allChannels } = await getChannelsContainer().items.readAll().fetchAll();
-  const channels = options.tag
+  const targetChannels = options.tag
     ? allChannels.filter((c) => Array.isArray(c.tags) && c.tags.includes(options.tag))
     : allChannels;
+  const channels = targetChannels.filter(isChannelScannable);
 
   const results = [];
   for (const channel of channels) {
@@ -258,4 +264,4 @@ async function runScan(options = {}) {
   return results;
 }
 
-module.exports = { runScan, scanChannel, daysSince, needsStatsRefresh };
+module.exports = { runScan, scanChannel, daysSince, needsStatsRefresh, isChannelScannable };

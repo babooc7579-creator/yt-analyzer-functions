@@ -1,5 +1,5 @@
 const assert = require('assert');
-const { daysSince, needsStatsRefresh } = require('../src/shared/scanLogic');
+const { daysSince, needsStatsRefresh, isChannelScannable } = require('../src/shared/scanLogic');
 const { parseDuration, parseChannelInput } = require('../src/shared/youtube');
 
 function daysAgo(n) {
@@ -52,3 +52,11 @@ assert.deepStrictEqual(parseChannelInput('https://www.youtube.com/channel/UCBJyc
 assert.deepStrictEqual(parseChannelInput('https://www.youtube.com/@핫하군'), { type: 'handle', value: '@핫하군' }, '한글 핸들 채널 링크 인식');
 
 console.log('✅ URL 자동 인식 테스트도 전부 통과!');
+
+
+// 8. channel status: only active channels are scannable
+assert.strictEqual(isChannelScannable({}), true, 'missing status should remain scannable for old channels');
+assert.strictEqual(isChannelScannable({ status: 'active' }), true, 'active channels should be scannable');
+assert.strictEqual(isChannelScannable({ status: 'paused' }), false, 'paused channels should not be scannable');
+assert.strictEqual(isChannelScannable({ status: 'discarded' }), false, 'discarded channels should not be scannable');
+console.log('channel status scan eligibility tests passed.');
