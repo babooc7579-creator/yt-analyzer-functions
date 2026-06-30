@@ -1,5 +1,5 @@
 const { app } = require('@azure/functions');
-const { runScan, scanChannel } = require('../shared/scanLogic');
+const { runScan, scanChannel, isChannelScannable } = require('../shared/scanLogic');
 const { getChannelsContainer } = require('../shared/cosmosClient');
 
 app.http('scanHttp', {
@@ -51,6 +51,11 @@ app.http('scanSelectedHttp', {
         const channel = channelsById.get(channelId);
         if (!channel) {
           results.push({ channelId, success: false, error: 'channel not found' });
+          continue;
+        }
+
+        if (!isChannelScannable(channel)) {
+          results.push({ channelId, channelTitle: channel.title, success: false, skipped: true, reason: 'channel is not active' });
           continue;
         }
 
