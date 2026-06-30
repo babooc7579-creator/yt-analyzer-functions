@@ -37,6 +37,7 @@ function toRecordDocument(record, userId, now = new Date().toISOString()) {
     draftTitle: record.draftTitle || '',
     note: record.note || '',
     targetPublishDate: record.targetPublishDate || '',
+    uploadedAt: record.uploadedAt || '',
     createdAt: record.createdAt || now,
     updatedAt: now,
   };
