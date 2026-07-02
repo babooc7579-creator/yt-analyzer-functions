@@ -9,6 +9,7 @@ const TTOTTO_DAYS_THRESHOLD = 180; // '또터또' 후보 기준: 6개월 이상
 const TTOTTO_MULTIPLIER_THRESHOLD = 3; // '또터또' 후보 기준: 채널 평균 대비 3배 이상
 
 const ACTIVE_CHANNEL_STATUS = 'active';
+const VIDEO_DOC_TYPE = 'video';
 const isChannelScannable = (channel = {}) => (
   (channel.status || ACTIVE_CHANNEL_STATUS) === ACTIVE_CHANNEL_STATUS
 );
@@ -31,7 +32,13 @@ async function getExistingVideoIds(channelId) {
   const container = getVideosContainer();
   const { resources } = await container.items
     .query(
-      { query: 'SELECT c.id FROM c WHERE c.channelId = @channelId', parameters: [{ name: '@channelId', value: channelId }] },
+      {
+        query: 'SELECT c.id FROM c WHERE c.channelId = @channelId AND (NOT IS_DEFINED(c.docType) OR c.docType = @videoDocType)',
+        parameters: [
+          { name: '@channelId', value: channelId },
+          { name: '@videoDocType', value: VIDEO_DOC_TYPE },
+        ],
+      },
       { partitionKey: channelId }
     )
     .fetchAll();
@@ -42,7 +49,13 @@ async function getChannelVideosFromDb(channelId) {
   const container = getVideosContainer();
   const { resources } = await container.items
     .query(
-      { query: 'SELECT * FROM c WHERE c.channelId = @channelId', parameters: [{ name: '@channelId', value: channelId }] },
+      {
+        query: 'SELECT * FROM c WHERE c.channelId = @channelId AND (NOT IS_DEFINED(c.docType) OR c.docType = @videoDocType)',
+        parameters: [
+          { name: '@channelId', value: channelId },
+          { name: '@videoDocType', value: VIDEO_DOC_TYPE },
+        ],
+      },
       { partitionKey: channelId }
     )
     .fetchAll();
