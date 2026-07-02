@@ -16,16 +16,38 @@ function toRecordId(userId, videoId) {
   return `${userId}:${videoId}`;
 }
 
-function toClientRecord(document) {
-  const { docType, userId, channelId, id, ...record } = document;
-  return record;
+function hasOwn(object, key) {
+  return Object.prototype.hasOwnProperty.call(object || {}, key);
 }
 
-function toRecordDocument(record, userId, now = new Date().toISOString()) {
+function normalizeStatusIds(statusIds) {
+  if (!Array.isArray(statusIds)) return [];
+  return [...new Set(statusIds.map((status) => (typeof status === 'string' ? status.trim() : '')).filter(Boolean))];
+}
+
+function getRecordStatusIds(record, fallbackStatus) {
+  const statusIds = hasOwn(record, 'statusIds') ? normalizeStatusIds(record.statusIds) : [];
+  if (fallbackStatus && !statusIds.includes(fallbackStatus)) return [...statusIds, fallbackStatus];
+  return statusIds;
+}
+
+function toClientRecord(document) {
+  const { docType, userId, channelId, id, ...record } = document;
+  return {
+    ...record,
+    statusIds: getRecordStatusIds(record, record.status),
+  };
+}
+
+function toRecordDocument(record, userId, now = new Date().toISOString(), existingDocument = null) {
   const videoId = String(record?.videoId || '').trim();
   if (!videoId) return { error: 'videoId is required.' };
 
   const partitionKey = getPartitionKey(userId);
+  const status = record.status || 'new';
+  const statusIds = hasOwn(record, 'statusIds')
+    ? normalizeStatusIds(record.statusIds)
+    : getRecordStatusIds(existingDocument, status);
 
   return {
     id: toRecordId(userId, videoId),
@@ -33,7 +55,8 @@ function toRecordDocument(record, userId, now = new Date().toISOString()) {
     userId,
     channelId: partitionKey,
     videoId,
-    status: record.status || 'new',
+    status,
+    statusIds,
     draftTitle: record.draftTitle || '',
     note: record.note || '',
     targetPublishDate: record.targetPublishDate || '',
@@ -89,13 +112,26 @@ app.http('saveVideoUserRecord', {
     try {
       const userId = getUserId(request);
       const body = await request.json();
-      const document = toRecordDocument(body, userId);
+      const container = getVideosContainer();
+      const partitionKey = getPartitionKey(userId);
+      const videoId = String(body?.videoId || '').trim();
+      let existingDocument = null;
+
+      if (videoId) {
+        try {
+          const { resource } = await container.item(toRecordId(userId, videoId), partitionKey).read();
+          existingDocument = resource || null;
+        } catch {
+          existingDocument = null;
+        }
+      }
+
+      const document = toRecordDocument(body, userId, new Date().toISOString(), existingDocument);
       if (document.error) {
         return { status: 400, jsonBody: { success: false, error: document.error } };
       }
 
-      const container = getVideosContainer();
-      await container.items.upsert(document, { partitionKey: getPartitionKey(userId) });
+      await container.items.upsert(document, { partitionKey });
       return { jsonBody: { success: true, record: toClientRecord(document) } };
     } catch (err) {
       context.error(`[video-records save] error: ${err.message}`);
@@ -103,6 +139,13 @@ app.http('saveVideoUserRecord', {
     }
   },
 });
+
+module.exports = {
+  getRecordStatusIds,
+  normalizeStatusIds,
+  toClientRecord,
+  toRecordDocument,
+};
 
 app.http('clearVideoUserRecords', {
   methods: ['DELETE'],
