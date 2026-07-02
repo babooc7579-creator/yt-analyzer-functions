@@ -5,7 +5,7 @@
   "main": "src/functions/*.js",
   "scripts": {
     "start": "func start",
-    "test": "node test/scanLogic.test.js"
+    "test": "node test/scanLogic.test.js && node test/videoUserRecords.test.js"
   },
   "dependencies": {
     "@azure/functions": "^4.5.1",
