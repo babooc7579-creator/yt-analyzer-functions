@@ -1,6 +1,8 @@
 const { app } = require('@azure/functions');
 const { getVideosContainer } = require('../shared/cosmosClient');
 
+const VIDEO_DOC_TYPE = 'video';
+
 // GET /api/videos?channelIds=UC123,UC456 - 선택한 채널들의 영상 데이터 조회
 app.http('listVideos', {
   methods: ['GET'],
@@ -22,8 +24,11 @@ app.http('listVideos', {
 
       const container = getVideosContainer();
       const query = {
-        query: 'SELECT * FROM c WHERE ARRAY_CONTAINS(@channelIds, c.channelId)',
-        parameters: [{ name: '@channelIds', value: channelIds }],
+        query: 'SELECT * FROM c WHERE ARRAY_CONTAINS(@channelIds, c.channelId) AND (NOT IS_DEFINED(c.docType) OR c.docType = @videoDocType)',
+        parameters: [
+          { name: '@channelIds', value: channelIds },
+          { name: '@videoDocType', value: VIDEO_DOC_TYPE },
+        ],
       };
       const { resources } = await container.items.query(query).fetchAll();
 
