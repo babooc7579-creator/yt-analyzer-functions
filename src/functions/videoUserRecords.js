@@ -25,6 +25,15 @@ function normalizeStatusIds(statusIds) {
   return [...new Set(statusIds.map((status) => (typeof status === 'string' ? status.trim() : '')).filter(Boolean))];
 }
 
+function normalizeString(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function getPreservedString(record, existingDocument, fieldName) {
+  if (hasOwn(record, fieldName)) return normalizeString(record[fieldName]);
+  return normalizeString(existingDocument?.[fieldName]);
+}
+
 function getRecordStatusIds(record, fallbackStatus) {
   const statusIds = hasOwn(record, 'statusIds') ? normalizeStatusIds(record.statusIds) : [];
   if (fallbackStatus && !statusIds.includes(fallbackStatus)) return [...statusIds, fallbackStatus];
@@ -35,6 +44,7 @@ function toClientRecord(document) {
   const { docType, userId, channelId, id, ...record } = document;
   return {
     ...record,
+    focusPinnedAt: normalizeString(record.focusPinnedAt),
     statusIds: getRecordStatusIds(record, record.status),
   };
 }
@@ -61,6 +71,7 @@ function toRecordDocument(record, userId, now = new Date().toISOString(), existi
     note: record.note || '',
     targetPublishDate: record.targetPublishDate || '',
     uploadedAt: record.uploadedAt || '',
+    focusPinnedAt: getPreservedString(record, existingDocument, 'focusPinnedAt'),
     createdAt: record.createdAt || now,
     updatedAt: now,
   };

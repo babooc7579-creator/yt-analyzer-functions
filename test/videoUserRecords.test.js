@@ -33,6 +33,19 @@ assert.deepStrictEqual(
   'old records without statusIds should return a statusIds fallback'
 );
 
+assert.strictEqual(
+  toClientRecord({
+    id: 'default:video-1',
+    docType: 'video_user_record',
+    userId: 'default',
+    channelId: '__video_user_records_default',
+    videoId: 'video-1',
+    status: 'used',
+  }).focusPinnedAt,
+  '',
+  'old records without focusPinnedAt should return an empty focus value'
+);
+
 const existingDocument = {
   id: 'default:video-2',
   docType: 'video_user_record',
@@ -41,6 +54,7 @@ const existingDocument = {
   videoId: 'video-2',
   status: 'reference_material',
   statusIds: ['reference_material', 'production_candidate'],
+  focusPinnedAt: '2026-07-01T09:00:00.000Z',
   createdAt: '2026-07-01T00:00:00.000Z',
   updatedAt: '2026-07-01T00:00:00.000Z',
 };
@@ -62,6 +76,45 @@ assert.deepStrictEqual(
   'saving without statusIds should preserve existing statusIds and include the current status'
 );
 assert.strictEqual(preservedDocument.status, 'used', 'representative status should remain unchanged');
+assert.strictEqual(
+  preservedDocument.focusPinnedAt,
+  '2026-07-01T09:00:00.000Z',
+  'saving without focusPinnedAt should preserve the existing focus pin'
+);
+
+const focusedDocument = toRecordDocument(
+  {
+    videoId: 'video-2',
+    status: 'production_candidate',
+    focusPinnedAt: ' 2026-07-02T09:30:00.000Z ',
+  },
+  'default',
+  now,
+  existingDocument
+);
+
+assert.strictEqual(
+  focusedDocument.focusPinnedAt,
+  '2026-07-02T09:30:00.000Z',
+  'an explicit focus pin should be normalized and saved'
+);
+
+const unfocusedDocument = toRecordDocument(
+  {
+    videoId: 'video-2',
+    status: 'production_candidate',
+    focusPinnedAt: '',
+  },
+  'default',
+  now,
+  existingDocument
+);
+
+assert.strictEqual(
+  unfocusedDocument.focusPinnedAt,
+  '',
+  'an explicit empty focus value should clear the focus pin'
+);
 
 const explicitStatusIdsDocument = toRecordDocument(
   {
