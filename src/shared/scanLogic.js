@@ -1,4 +1,6 @@
+const { randomUUID } = require('crypto');
 const { getVideosContainer, getChannelsContainer } = require('./cosmosClient');
+const { saveScanLog } = require('./scanLogs');
 const { parseDuration, fetchPlaylistPage, fetchVideoStatsBatch, fetchChannelInfo } = require('./youtube');
 
 // === 갱신 정책 (API 호출 절약을 위한 핵심 규칙) ===
@@ -179,7 +181,7 @@ async function saveChannelScanState(channel, state) {
 }
 
 // 채널 하나를 스캔: 신규 영상 발굴 + 효율적 통계 갱신 + 또터또 후보 탐지
-async function scanChannel(channel) {
+async function scanChannel(channel, scanMetadata = {}) {
   try {
   // 채널 통계(구독자/영상수/전체조회수) 갱신 — API 호출 1회 추가
   try {
@@ -231,6 +233,7 @@ async function scanChannel(channel) {
     updatedAt: now,
     lastScanSummary,
   });
+  await saveScanLog(channel, lastScanSummary, scanMetadata);
 
   const ttoTtoCandidates = withMultiplier.filter(
     (v) => daysSince(v.uploadDate) >= TTOTTO_DAYS_THRESHOLD && v.multiplier >= TTOTTO_MULTIPLIER_THRESHOLD
@@ -254,6 +257,7 @@ async function scanChannel(channel) {
       error: err.message,
     });
     await saveChannelScanState(channel, { lastScanSummary, lastScannedAt: now, updatedAt: now });
+    await saveScanLog(channel, lastScanSummary, scanMetadata);
     throw err;
   }
 }
@@ -265,11 +269,15 @@ async function runScan(options = {}) {
     ? allChannels.filter((c) => Array.isArray(c.tags) && c.tags.includes(options.tag))
     : allChannels;
   const channels = targetChannels.filter(isChannelScannable);
+  const scanRunId = options.scanRunId || randomUUID();
 
   const results = [];
   for (const channel of channels) {
     try {
-      results.push(await scanChannel(channel));
+      results.push(await scanChannel(channel, {
+        scanRunId,
+        trigger: options.trigger || (options.tag ? 'manual_tag' : 'unknown'),
+      }));
     } catch (err) {
       results.push({ channelId: channel.id, channelTitle: channel.title, error: err.message });
     }

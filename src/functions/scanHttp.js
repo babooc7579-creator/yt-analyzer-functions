@@ -1,4 +1,5 @@
 const { app } = require('@azure/functions');
+const { randomUUID } = require('crypto');
 const { runScan, scanChannel, isChannelScannable } = require('../shared/scanLogic');
 const { getChannelsContainer } = require('../shared/cosmosClient');
 
@@ -10,7 +11,11 @@ app.http('scanHttp', {
     const tag = request.query.get('tag') || null;
     context.log(`[수동 스캔] 요청 받음${tag ? ` (태그: ${tag})` : ' (전체)'}`);
     try {
-      const results = await runScan(tag ? { tag } : {});
+      const results = await runScan({
+        ...(tag ? { tag } : {}),
+        scanRunId: randomUUID(),
+        trigger: tag ? 'manual_tag' : 'manual_all',
+      });
       return { jsonBody: { success: true, results } };
     } catch (err) {
       context.error(`[수동 스캔] 오류: ${err.message}`);
@@ -35,6 +40,7 @@ app.http('scanSelectedHttp', {
       }
 
       const uniqueChannelIds = [...new Set(channelIds)];
+      const scanRunId = randomUUID();
       context.log(`[selected scan] requested ${uniqueChannelIds.length} channels${body.reason ? ` (${body.reason})` : ''}`);
 
       const { resources: channels } = await getChannelsContainer().items
@@ -60,7 +66,7 @@ app.http('scanSelectedHttp', {
         }
 
         try {
-          const result = await scanChannel(channel);
+          const result = await scanChannel(channel, { scanRunId, trigger: 'selected' });
           results.push({ ...result, success: true });
         } catch (err) {
           results.push({ channelId, channelTitle: channel.title, success: false, error: err.message });
