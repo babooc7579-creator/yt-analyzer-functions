@@ -1,5 +1,7 @@
 const assert = require('assert');
 const { daysSince, needsStatsRefresh, isChannelScannable } = require('../src/shared/scanLogic');
+const { buildScanLogDocument, normalizeTrigger } = require('../src/shared/scanLogs');
+const { parsePageSize } = require('../src/functions/scanLogs');
 const { parseDuration, parseChannelInput } = require('../src/shared/youtube');
 
 function daysAgo(n) {
@@ -60,3 +62,42 @@ assert.strictEqual(isChannelScannable({ status: 'active' }), true, 'active chann
 assert.strictEqual(isChannelScannable({ status: 'paused' }), false, 'paused channels should not be scannable');
 assert.strictEqual(isChannelScannable({ status: 'discarded' }), false, 'discarded channels should not be scannable');
 console.log('channel status scan eligibility tests passed.');
+
+// 9. scan history documents preserve the latest summary without changing scan behavior
+const scanLog = buildScanLogDocument(
+  { id: 'channel-1', title: '테스트 채널' },
+  {
+    status: 'partial',
+    scannedAt: '2026-07-27T12:00:00.000Z',
+    newVideosFound: 3,
+    statsRefreshed: 8,
+    savedVideosTotal: 120,
+    channelTotalVideos: 150,
+    estimatedMissingVideos: 30,
+    coverageRate: 80,
+  },
+  { id: 'scan-log-1', scanRunId: 'run-1', trigger: 'selected' },
+);
+assert.deepStrictEqual(scanLog, {
+  id: 'scan-log-1',
+  docType: 'scan_log',
+  channelId: 'channel-1',
+  channelTitle: '테스트 채널',
+  status: 'partial',
+  scannedAt: '2026-07-27T12:00:00.000Z',
+  newVideosFound: 3,
+  statsRefreshed: 8,
+  stoppedAtLatestVideoId: false,
+  savedVideosTotal: 120,
+  channelTotalVideos: 150,
+  estimatedMissingVideos: 30,
+  coverageRate: 80,
+  error: null,
+  trigger: 'selected',
+  scanRunId: 'run-1',
+});
+assert.strictEqual(normalizeTrigger('unexpected'), 'unknown', 'unknown trigger values must be normalized');
+assert.deepStrictEqual(parsePageSize(null), { pageSize: 100 }, 'scan log default page size');
+assert.deepStrictEqual(parsePageSize('200'), { pageSize: 200 }, 'scan log max page size');
+assert.ok(parsePageSize('201').error, 'scan log page size above max must be rejected');
+console.log('scan history document and pagination tests passed.');
