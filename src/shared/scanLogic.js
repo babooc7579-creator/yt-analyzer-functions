@@ -146,6 +146,21 @@ async function upsertVideos(videos) {
   }
 }
 
+async function refreshChannelMultipliers(channelId) {
+  const allVideos = await getChannelVideosFromDb(channelId);
+  const validViews = allVideos.filter((video) => video.viewCount > 0).map((video) => video.viewCount);
+  const avgViews = validViews.length > 0
+    ? validViews.reduce((total, viewCount) => total + viewCount, 0) / validViews.length
+    : 1;
+  const withMultiplier = allVideos.map((video) => ({
+    ...video,
+    multiplier: Number(((Number(video.viewCount) || 0) / avgViews).toFixed(2)),
+  }));
+
+  await upsertVideos(withMultiplier);
+  return withMultiplier;
+}
+
 function getChannelTotalVideos(channel) {
   const value = channel.stats?.totalVideoCount ?? channel.stats?.videoCount ?? channel.totalVideoCount ?? 0;
   const total = Number(value);
@@ -207,15 +222,8 @@ async function scanChannel(channel, scanMetadata = {}) {
   }
 
   // 채널 평균 조회수를 다시 계산해서 '대박지수(multiplier)' 갱신
-  const allVideos = await getChannelVideosFromDb(channel.id);
-  const validViews = allVideos.filter((v) => v.viewCount > 0).map((v) => v.viewCount);
-  const avgViews = validViews.length > 0 ? validViews.reduce((a, b) => a + b, 0) / validViews.length : 1;
-
-  const withMultiplier = allVideos.map((v) => ({
-    ...v,
-    multiplier: Number((v.viewCount / avgViews).toFixed(2)),
-  }));
-  await upsertVideos(withMultiplier);
+  const withMultiplier = await refreshChannelMultipliers(channel.id);
+  const allVideos = withMultiplier;
 
   const now = new Date().toISOString();
   const lastScanSummary = buildLastScanSummary(channel, {
@@ -285,4 +293,16 @@ async function runScan(options = {}) {
   return results;
 }
 
-module.exports = { runScan, scanChannel, daysSince, needsStatsRefresh, isChannelScannable };
+module.exports = {
+  applyStats,
+  daysSince,
+  getChannelTotalVideos,
+  getChannelVideosFromDb,
+  getExistingVideoIds,
+  isChannelScannable,
+  needsStatsRefresh,
+  refreshChannelMultipliers,
+  runScan,
+  scanChannel,
+  upsertVideos,
+};

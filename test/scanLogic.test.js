@@ -3,6 +3,12 @@ const { daysSince, needsStatsRefresh, isChannelScannable } = require('../src/sha
 const { buildScanLogDocument, normalizeTrigger } = require('../src/shared/scanLogs');
 const { parsePageSize } = require('../src/functions/scanLogs');
 const { parseDuration, parseChannelInput } = require('../src/shared/youtube');
+const {
+  backfillChannelHistory,
+  buildBackfillState,
+  mapPlaylistItemToVideo,
+  parseBackfillPageLimit,
+} = require('../src/shared/backfillLogic');
 
 function daysAgo(n) {
   const d = new Date();
@@ -101,3 +107,112 @@ assert.deepStrictEqual(parsePageSize(null), { pageSize: 100 }, 'scan log default
 assert.deepStrictEqual(parsePageSize('200'), { pageSize: 200 }, 'scan log max page size');
 assert.ok(parsePageSize('201').error, 'scan log page size above max must be rejected');
 console.log('scan history document and pagination tests passed.');
+
+// 10. manual historical backfill stays capped and preserves resumable progress
+assert.strictEqual(parseBackfillPageLimit(), 2, 'backfill should default to two pages');
+assert.strictEqual(parseBackfillPageLimit(0), 1, 'backfill should fetch at least one page');
+assert.strictEqual(parseBackfillPageLimit(20), 3, 'backfill should never exceed three pages');
+assert.deepStrictEqual(
+  mapPlaylistItemToVideo({
+    snippet: {
+      resourceId: { videoId: 'video-1' },
+      title: '과거 영상',
+      publishedAt: '2025-01-02T03:04:05Z',
+      thumbnails: { high: { url: 'high.jpg' } },
+    },
+  }, { id: 'channel-1', title: '테스트 채널', language: 'ko' }),
+  {
+    id: 'video-1',
+    docType: 'video',
+    channelId: 'channel-1',
+    channelTitle: '테스트 채널',
+    language: 'ko',
+    title: '과거 영상',
+    thumbnail: 'high.jpg',
+    uploadDate: '2025-01-02',
+  },
+  'backfill playlist items should map to compatible video documents',
+);
+
+const nextBackfillState = buildBackfillState(
+  {
+    stats: { totalVideoCount: 300 },
+    backfillState: { pagesFetchedTotal: 2, videosSavedTotal: 40 },
+  },
+  {
+    completed: false,
+    inspectedVideos: 100,
+    maxPages: 2,
+    nextPageToken: 'next-page',
+    pagesFetched: 2,
+    savedVideosTotal: 140,
+    savedVideosThisRun: 20,
+    startedFromBeginning: false,
+    updatedAt: '2026-07-27T12:00:00.000Z',
+  },
+);
+assert.strictEqual(nextBackfillState.nextPageToken, 'next-page', 'next page token should be preserved');
+assert.strictEqual(nextBackfillState.pagesFetchedTotal, 4, 'page progress should accumulate');
+assert.strictEqual(nextBackfillState.videosSavedTotal, 60, 'saved progress should accumulate');
+assert.strictEqual(nextBackfillState.lastRun.estimatedMissingVideos, 160, 'remaining estimate should be updated');
+
+(async () => {
+  const savedStates = [];
+  const result = await backfillChannelHistory(
+    {
+      id: 'channel-1',
+      title: '테스트 채널',
+      uploadsId: 'uploads-1',
+      stats: { totalVideoCount: 3 },
+    },
+    { maxPages: 2 },
+    {
+      fetchPlaylistPage: async (_uploadsId, token) => (
+        token
+          ? {
+              items: [{
+                snippet: {
+                  resourceId: { videoId: 'video-3' },
+                  title: '세 번째 영상',
+                  publishedAt: '2024-01-01T00:00:00Z',
+                },
+              }],
+            }
+          : {
+              nextPageToken: 'page-2',
+              items: [
+                {
+                  snippet: {
+                    resourceId: { videoId: 'video-1' },
+                    title: '첫 영상',
+                    publishedAt: '2026-01-01T00:00:00Z',
+                  },
+                },
+                {
+                  snippet: {
+                    resourceId: { videoId: 'video-2' },
+                    title: '두 번째 영상',
+                    publishedAt: '2025-01-01T00:00:00Z',
+                  },
+                },
+              ],
+            }
+      ),
+      getExistingVideoIds: async () => new Set(['video-1']),
+      applyStats: async (videos) => videos.map((video) => Object.assign(video, { viewCount: 10 })),
+      upsertVideos: async () => {},
+      refreshChannelMultipliers: async () => [{ id: 'video-1' }, { id: 'video-2' }, { id: 'video-3' }],
+      saveBackfillState: async (_channel, state) => savedStates.push(state),
+    },
+  );
+
+  assert.strictEqual(result.pagesFetched, 2, 'manual backfill should respect the requested page cap');
+  assert.strictEqual(result.inspectedVideos, 3, 'manual backfill should report inspected videos');
+  assert.strictEqual(result.savedVideosThisRun, 2, 'existing videos should not be saved again');
+  assert.strictEqual(result.completed, true, 'missing next token should complete the backfill');
+  assert.strictEqual(savedStates[0].nextPageToken, null, 'completed backfill should clear its cursor');
+  console.log('manual historical backfill tests passed.');
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
