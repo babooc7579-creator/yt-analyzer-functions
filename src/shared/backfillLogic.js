@@ -8,8 +8,8 @@ const {
 } = require('./scanLogic');
 const { fetchPlaylistPage } = require('./youtube');
 
-const DEFAULT_BACKFILL_PAGES = 2;
-const MAX_BACKFILL_PAGES = 3;
+const DEFAULT_BACKFILL_PAGES = 10;
+const MAX_BACKFILL_PAGES = 10;
 const VIDEO_DOC_TYPE = 'video';
 
 function parseBackfillPageLimit(value) {
@@ -55,11 +55,21 @@ function buildBackfillState(channel, {
   const coverageRate = channelTotalVideos > 0
     ? Number(((savedVideosTotal / channelTotalVideos) * 100).toFixed(1))
     : null;
+  const previousInspectedTotal = Number(previousState.videosInspectedTotal)
+    || Math.min((Number(previousState.pagesFetchedTotal) || 0) * 50, channelTotalVideos || Infinity);
+  const videosInspectedTotal = previousInspectedTotal + inspectedVideos;
+  const inspectionProgressRate = completed
+    ? 100
+    : channelTotalVideos > 0
+      ? Number((Math.min(videosInspectedTotal / channelTotalVideos, 1) * 100).toFixed(1))
+      : null;
 
   return {
     completed,
+    inspectionProgressRate,
     nextPageToken: completed ? null : nextPageToken,
     pagesFetchedTotal: (Number(previousState.pagesFetchedTotal) || 0) + pagesFetched,
+    videosInspectedTotal,
     videosSavedTotal: (Number(previousState.videosSavedTotal) || 0) + savedVideosThisRun,
     updatedAt,
     lastRun: {
@@ -67,6 +77,7 @@ function buildBackfillState(channel, {
       completed,
       coverageRate,
       estimatedMissingVideos,
+      inspectionProgressRate,
       inspectedVideos,
       maxPages,
       pagesFetched,
@@ -74,6 +85,7 @@ function buildBackfillState(channel, {
       savedVideosTotal,
       startedFromBeginning,
       updatedAt,
+      videosInspectedTotal,
     },
   };
 }
