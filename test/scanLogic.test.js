@@ -109,9 +109,9 @@ assert.ok(parsePageSize('201').error, 'scan log page size above max must be reje
 console.log('scan history document and pagination tests passed.');
 
 // 10. manual historical backfill stays capped and preserves resumable progress
-assert.strictEqual(parseBackfillPageLimit(), 2, 'backfill should default to two pages');
+assert.strictEqual(parseBackfillPageLimit(), 10, 'backfill should default to ten pages');
 assert.strictEqual(parseBackfillPageLimit(0), 1, 'backfill should fetch at least one page');
-assert.strictEqual(parseBackfillPageLimit(20), 3, 'backfill should never exceed three pages');
+assert.strictEqual(parseBackfillPageLimit(20), 10, 'backfill should never exceed ten pages');
 assert.deepStrictEqual(
   mapPlaylistItemToVideo({
     snippet: {
@@ -153,6 +153,8 @@ const nextBackfillState = buildBackfillState(
 );
 assert.strictEqual(nextBackfillState.nextPageToken, 'next-page', 'next page token should be preserved');
 assert.strictEqual(nextBackfillState.pagesFetchedTotal, 4, 'page progress should accumulate');
+assert.strictEqual(nextBackfillState.videosInspectedTotal, 200, 'inspected progress should accumulate for legacy states');
+assert.strictEqual(nextBackfillState.inspectionProgressRate, 66.7, 'inspection progress should use the channel upload count');
 assert.strictEqual(nextBackfillState.videosSavedTotal, 60, 'saved progress should accumulate');
 assert.strictEqual(nextBackfillState.lastRun.estimatedMissingVideos, 160, 'remaining estimate should be updated');
 
@@ -210,6 +212,7 @@ assert.strictEqual(nextBackfillState.lastRun.estimatedMissingVideos, 160, 'remai
   assert.strictEqual(result.inspectedVideos, 3, 'manual backfill should report inspected videos');
   assert.strictEqual(result.savedVideosThisRun, 2, 'existing videos should not be saved again');
   assert.strictEqual(result.completed, true, 'missing next token should complete the backfill');
+  assert.strictEqual(result.inspectionProgressRate, 100, 'playlist exhaustion should report complete inspection');
   assert.strictEqual(savedStates[0].nextPageToken, null, 'completed backfill should clear its cursor');
   console.log('manual historical backfill tests passed.');
 })().catch((error) => {
