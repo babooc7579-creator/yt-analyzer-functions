@@ -46,6 +46,34 @@ assert.strictEqual(
   'old records without focusPinnedAt should return an empty focus value'
 );
 
+assert.deepStrictEqual(
+  {
+    scriptAnalysis: toClientRecord({
+      videoId: 'legacy-video',
+      status: 'production_candidate',
+    }).scriptAnalysis,
+    scriptBody: toClientRecord({
+      videoId: 'legacy-video',
+      status: 'production_candidate',
+    }).scriptBody,
+    scriptOutline: toClientRecord({
+      videoId: 'legacy-video',
+      status: 'production_candidate',
+    }).scriptOutline,
+    scriptStatus: toClientRecord({
+      videoId: 'legacy-video',
+      status: 'production_candidate',
+    }).scriptStatus,
+  },
+  {
+    scriptAnalysis: '',
+    scriptBody: '',
+    scriptOutline: '',
+    scriptStatus: '',
+  },
+  'old records without structured script fields should return empty values'
+);
+
 const existingDocument = {
   id: 'default:video-2',
   docType: 'video_user_record',
@@ -55,6 +83,10 @@ const existingDocument = {
   status: 'reference_material',
   statusIds: ['reference_material', 'production_candidate'],
   focusPinnedAt: '2026-07-01T09:00:00.000Z',
+  scriptAnalysis: '기존 분석',
+  scriptBody: '기존 대본 본문',
+  scriptOutline: '기존 구성안',
+  scriptStatus: 'draft',
   createdAt: '2026-07-01T00:00:00.000Z',
   updatedAt: '2026-07-01T00:00:00.000Z',
 };
@@ -80,6 +112,21 @@ assert.strictEqual(
   preservedDocument.focusPinnedAt,
   '2026-07-01T09:00:00.000Z',
   'saving without focusPinnedAt should preserve the existing focus pin'
+);
+assert.deepStrictEqual(
+  {
+    scriptAnalysis: preservedDocument.scriptAnalysis,
+    scriptBody: preservedDocument.scriptBody,
+    scriptOutline: preservedDocument.scriptOutline,
+    scriptStatus: preservedDocument.scriptStatus,
+  },
+  {
+    scriptAnalysis: '기존 분석',
+    scriptBody: '기존 대본 본문',
+    scriptOutline: '기존 구성안',
+    scriptStatus: 'draft',
+  },
+  'old clients should not erase structured script fields when saving another record value'
 );
 
 const focusedDocument = toRecordDocument(
@@ -114,6 +161,66 @@ assert.strictEqual(
   unfocusedDocument.focusPinnedAt,
   '',
   'an explicit empty focus value should clear the focus pin'
+);
+
+const structuredScriptDocument = toRecordDocument(
+  {
+    videoId: 'video-2',
+    status: 'production_candidate',
+    scriptAnalysis: '  핵심 소재 분석  ',
+    scriptBody: '  최종 대본 본문  ',
+    scriptOutline: '  도입 → 전개 → 마무리  ',
+    scriptStatus: '  revision  ',
+  },
+  'default',
+  now,
+  existingDocument
+);
+
+assert.deepStrictEqual(
+  {
+    scriptAnalysis: structuredScriptDocument.scriptAnalysis,
+    scriptBody: structuredScriptDocument.scriptBody,
+    scriptOutline: structuredScriptDocument.scriptOutline,
+    scriptStatus: structuredScriptDocument.scriptStatus,
+  },
+  {
+    scriptAnalysis: '핵심 소재 분석',
+    scriptBody: '최종 대본 본문',
+    scriptOutline: '도입 → 전개 → 마무리',
+    scriptStatus: 'revision',
+  },
+  'structured script fields should be normalized and saved explicitly'
+);
+
+const clearedScriptDocument = toRecordDocument(
+  {
+    videoId: 'video-2',
+    status: 'production_candidate',
+    scriptAnalysis: '',
+    scriptBody: '',
+    scriptOutline: '',
+    scriptStatus: '',
+  },
+  'default',
+  now,
+  existingDocument
+);
+
+assert.deepStrictEqual(
+  {
+    scriptAnalysis: clearedScriptDocument.scriptAnalysis,
+    scriptBody: clearedScriptDocument.scriptBody,
+    scriptOutline: clearedScriptDocument.scriptOutline,
+    scriptStatus: clearedScriptDocument.scriptStatus,
+  },
+  {
+    scriptAnalysis: '',
+    scriptBody: '',
+    scriptOutline: '',
+    scriptStatus: '',
+  },
+  'explicit empty structured script values should clear those fields'
 );
 
 const explicitStatusIdsDocument = toRecordDocument(

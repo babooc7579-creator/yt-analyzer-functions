@@ -45,6 +45,10 @@ function toClientRecord(document) {
   return {
     ...record,
     focusPinnedAt: normalizeString(record.focusPinnedAt),
+    scriptAnalysis: normalizeString(record.scriptAnalysis),
+    scriptBody: normalizeString(record.scriptBody),
+    scriptOutline: normalizeString(record.scriptOutline),
+    scriptStatus: normalizeString(record.scriptStatus),
     statusIds: getRecordStatusIds(record, record.status),
   };
 }
@@ -72,6 +76,10 @@ function toRecordDocument(record, userId, now = new Date().toISOString(), existi
     targetPublishDate: record.targetPublishDate || '',
     uploadedAt: record.uploadedAt || '',
     focusPinnedAt: getPreservedString(record, existingDocument, 'focusPinnedAt'),
+    scriptAnalysis: getPreservedString(record, existingDocument, 'scriptAnalysis'),
+    scriptBody: getPreservedString(record, existingDocument, 'scriptBody'),
+    scriptOutline: getPreservedString(record, existingDocument, 'scriptOutline'),
+    scriptStatus: getPreservedString(record, existingDocument, 'scriptStatus'),
     createdAt: record.createdAt || now,
     updatedAt: now,
   };
