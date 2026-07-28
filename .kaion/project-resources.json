@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "projectId": "yt-analyzer",
+  "projectName": "타임머신 CRM / Creator OS",
+  "repository": "babooc7579-creator/yt-analyzer-functions",
+  "repositoryRole": "azure-functions-backend",
+  "owner": "Kaion IT",
+  "environment": ["development", "production"],
+  "criticality": "internal-production",
+  "resourceRegisterId": "kaion-central-resource-register",
+  "activeResourceIds": [
+    "azure-sponsorship",
+    "github-account",
+    "azure-yt-analyzer-function",
+    "azure-yt-analyzer-cosmos",
+    "youtube-data-api"
+  ],
+  "optionalResourceIds": [
+    "chatgpt-subscription"
+  ],
+  "excludedScopes": [
+    "kaion-homepage",
+    "service-hub",
+    "personal-monetization"
+  ],
+  "changePolicy": {
+    "readRegisterBeforePaidChange": true,
+    "recordResourceAndHistoryTogether": true,
+    "requireApprovalForPurchaseOrCancellation": true,
+    "paidApiDefault": "manual-one-channel-up-to-100-no-repeat",
+    "distinguishDatabaseReadFromApiCollection": true,
+    "preserveSeparateBackfillState": true,
+    "neverRecordSecrets": true
+  }
+}
