@@ -34,6 +34,11 @@ function getPreservedString(record, existingDocument, fieldName) {
   return normalizeString(existingDocument?.[fieldName]);
 }
 
+function getPreservedStatus(record, existingDocument) {
+  if (hasOwn(record, 'status')) return normalizeString(record.status) || 'new';
+  return normalizeString(existingDocument?.status) || 'new';
+}
+
 function getRecordStatusIds(record, fallbackStatus) {
   const statusIds = hasOwn(record, 'statusIds') ? normalizeStatusIds(record.statusIds) : [];
   if (fallbackStatus && !statusIds.includes(fallbackStatus)) return [...statusIds, fallbackStatus];
@@ -58,7 +63,7 @@ function toRecordDocument(record, userId, now = new Date().toISOString(), existi
   if (!videoId) return { error: 'videoId is required.' };
 
   const partitionKey = getPartitionKey(userId);
-  const status = record.status || 'new';
+  const status = getPreservedStatus(record, existingDocument);
   const statusIds = hasOwn(record, 'statusIds')
     ? normalizeStatusIds(record.statusIds)
     : getRecordStatusIds(existingDocument, status);
@@ -71,16 +76,16 @@ function toRecordDocument(record, userId, now = new Date().toISOString(), existi
     videoId,
     status,
     statusIds,
-    draftTitle: record.draftTitle || '',
-    note: record.note || '',
-    targetPublishDate: record.targetPublishDate || '',
-    uploadedAt: record.uploadedAt || '',
+    draftTitle: getPreservedString(record, existingDocument, 'draftTitle'),
+    note: getPreservedString(record, existingDocument, 'note'),
+    targetPublishDate: getPreservedString(record, existingDocument, 'targetPublishDate'),
+    uploadedAt: getPreservedString(record, existingDocument, 'uploadedAt'),
     focusPinnedAt: getPreservedString(record, existingDocument, 'focusPinnedAt'),
     scriptAnalysis: getPreservedString(record, existingDocument, 'scriptAnalysis'),
     scriptBody: getPreservedString(record, existingDocument, 'scriptBody'),
     scriptOutline: getPreservedString(record, existingDocument, 'scriptOutline'),
     scriptStatus: getPreservedString(record, existingDocument, 'scriptStatus'),
-    createdAt: record.createdAt || now,
+    createdAt: record.createdAt || existingDocument?.createdAt || now,
     updatedAt: now,
   };
 }
@@ -161,6 +166,7 @@ app.http('saveVideoUserRecord', {
 
 module.exports = {
   getRecordStatusIds,
+  getPreservedStatus,
   normalizeStatusIds,
   toClientRecord,
   toRecordDocument,

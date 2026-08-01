@@ -1,6 +1,7 @@
 const assert = require('assert');
 const {
   getRecordStatusIds,
+  getPreservedStatus,
   normalizeStatusIds,
   toClientRecord,
   toRecordDocument,
@@ -82,6 +83,10 @@ const existingDocument = {
   videoId: 'video-2',
   status: 'reference_material',
   statusIds: ['reference_material', 'production_candidate'],
+  draftTitle: '기존 제작 제목',
+  note: '기존 통합 메모',
+  targetPublishDate: '2026-07-20',
+  uploadedAt: '2026-07-21T00:00:00.000Z',
   focusPinnedAt: '2026-07-01T09:00:00.000Z',
   scriptAnalysis: '기존 분석',
   scriptBody: '기존 대본 본문',
@@ -90,6 +95,81 @@ const existingDocument = {
   createdAt: '2026-07-01T00:00:00.000Z',
   updatedAt: '2026-07-01T00:00:00.000Z',
 };
+
+assert.strictEqual(
+  getPreservedStatus({ videoId: 'video-2' }, existingDocument),
+  'reference_material',
+  'omitting status should preserve the existing representative status'
+);
+
+const partialDocument = toRecordDocument(
+  {
+    videoId: 'video-2',
+    focusPinnedAt: '2026-07-02T10:00:00.000Z',
+  },
+  'default',
+  now,
+  existingDocument
+);
+
+assert.deepStrictEqual(
+  {
+    status: partialDocument.status,
+    statusIds: partialDocument.statusIds,
+    draftTitle: partialDocument.draftTitle,
+    note: partialDocument.note,
+    targetPublishDate: partialDocument.targetPublishDate,
+    uploadedAt: partialDocument.uploadedAt,
+    scriptAnalysis: partialDocument.scriptAnalysis,
+    scriptBody: partialDocument.scriptBody,
+    scriptOutline: partialDocument.scriptOutline,
+    scriptStatus: partialDocument.scriptStatus,
+    createdAt: partialDocument.createdAt,
+  },
+  {
+    status: 'reference_material',
+    statusIds: ['reference_material', 'production_candidate'],
+    draftTitle: '기존 제작 제목',
+    note: '기존 통합 메모',
+    targetPublishDate: '2026-07-20',
+    uploadedAt: '2026-07-21T00:00:00.000Z',
+    scriptAnalysis: '기존 분석',
+    scriptBody: '기존 대본 본문',
+    scriptOutline: '기존 구성안',
+    scriptStatus: 'draft',
+    createdAt: '2026-07-01T00:00:00.000Z',
+  },
+  'a partial update should preserve every omitted production field'
+);
+
+const explicitlyClearedLegacyFields = toRecordDocument(
+  {
+    videoId: 'video-2',
+    draftTitle: '',
+    note: '',
+    targetPublishDate: '',
+    uploadedAt: '',
+  },
+  'default',
+  now,
+  existingDocument
+);
+
+assert.deepStrictEqual(
+  {
+    draftTitle: explicitlyClearedLegacyFields.draftTitle,
+    note: explicitlyClearedLegacyFields.note,
+    targetPublishDate: explicitlyClearedLegacyFields.targetPublishDate,
+    uploadedAt: explicitlyClearedLegacyFields.uploadedAt,
+  },
+  {
+    draftTitle: '',
+    note: '',
+    targetPublishDate: '',
+    uploadedAt: '',
+  },
+  'explicit empty production fields should still clear their saved values'
+);
 
 const preservedDocument = toRecordDocument(
   {
