@@ -152,6 +152,70 @@ async function searchYoutubeVideos(options = {}, fetchImpl = fetch) {
   };
 }
 
+async function searchYoutubeChannels(options = {}, fetchImpl = fetch) {
+  const searchParams = {
+    part: 'snippet',
+    type: 'channel',
+    q: options.query,
+    maxResults: String(options.maxResults || 12),
+    order: 'relevance',
+    safeSearch: 'moderate',
+  };
+
+  for (const key of ['pageToken', 'regionCode', 'relevanceLanguage']) {
+    if (options[key]) searchParams[key] = options[key];
+  }
+
+  const searchData = await fetchYoutubeJson('search', searchParams, fetchImpl);
+  const channelIds = (searchData.items || []).map((item) => item?.id?.channelId).filter(Boolean);
+  if (channelIds.length === 0) {
+    return {
+      items: [],
+      nextPageToken: searchData.nextPageToken || '',
+      prevPageToken: searchData.prevPageToken || '',
+      resultCount: 0,
+    };
+  }
+
+  const channelData = await fetchYoutubeJson('channels', {
+    part: 'snippet,statistics,contentDetails',
+    id: channelIds.join(','),
+  }, fetchImpl);
+  const channelMap = new Map((channelData.items || []).map((item) => [item.id, item]));
+  const items = channelIds.map((channelId) => {
+    const channel = channelMap.get(channelId);
+    if (!channel) return null;
+    const statistics = channel.statistics || {};
+    const subscriberCount = toCount(statistics.subscriberCount);
+    const totalVideoCount = toCount(statistics.videoCount);
+    const totalViewCount = toCount(statistics.viewCount);
+
+    return {
+      channelId,
+      title: channel.snippet?.title || '',
+      description: channel.snippet?.description || '',
+      customUrl: channel.snippet?.customUrl || '',
+      thumbnail: getBestThumbnail(channel.snippet?.thumbnails),
+      country: channel.snippet?.country || '',
+      publishedAt: channel.snippet?.publishedAt || '',
+      subscriberCount,
+      hiddenSubscriberCount: Boolean(statistics.hiddenSubscriberCount),
+      totalVideoCount,
+      totalViewCount,
+      avgViewCount: totalVideoCount > 0 ? Math.round(totalViewCount / totalVideoCount) : 0,
+      uploadsId: channel.contentDetails?.relatedPlaylists?.uploads || '',
+      url: `https://www.youtube.com/channel/${channelId}`,
+    };
+  }).filter(Boolean);
+
+  return {
+    items,
+    nextPageToken: searchData.nextPageToken || '',
+    prevPageToken: searchData.prevPageToken || '',
+    resultCount: items.length,
+  };
+}
+
 // 채널의 업로드 재생목록에서 영상 한 페이지(최대 50개)를 가져옴
 async function fetchPlaylistPage(uploadsPlaylistId, pageToken) {
   const apiKey = getApiKey();
@@ -286,5 +350,6 @@ module.exports = {
   fetchVideoStatsBatch,
   fetchChannelInfo,
   parseChannelInput,
+  searchYoutubeChannels,
   searchYoutubeVideos,
 };
