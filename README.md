@@ -25,9 +25,15 @@ YouTube 채널 자동 스캔 백엔드 (Azure Functions, Node.js v4 모델)
 ## 테스트
 
 ```bash
-npm install
+npm ci
 npm test
 ```
+
+## GitHub 자동 검수·배포
+
+- Pull Request: Node.js 24에서 잠금 파일 기준 의존성 설치와 전체 단위 테스트만 실행합니다.
+- `main` 반영 또는 수동 실행: 같은 검수를 통과한 패키지만 기존 Azure Function App에 배포합니다.
+- Pull Request에서는 Azure 로그인과 운영 배포를 실행하지 않습니다.
 
 ## 로컬 실행 (선택사항, Azure Functions Core Tools 필요)
 
