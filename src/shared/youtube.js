@@ -11,7 +11,7 @@ function getApiKey() {
 // 영상 길이(ISO 8601, 예: PT1M30S)를 분석해서 쇼츠 여부와 표시용 문자열을 반환
 function parseDuration(durationStr) {
   const match = (durationStr || '').match(/PT(\d+H)?(\d+M)?(\d+S)?/);
-  if (!match) return { isShorts: false, formatted: '00:00' };
+  if (!match) return { isShorts: false, formatted: '00:00', totalSeconds: 0 };
 
   const hours = parseInt(match[1]) || 0;
   const minutes = parseInt(match[2]) || 0;
@@ -23,7 +23,133 @@ function parseDuration(durationStr) {
   if (hours > 0) formatted += `${hours}:`;
   formatted += `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 
-  return { isShorts, formatted };
+  return { isShorts, formatted, totalSeconds };
+}
+
+function toCount(value) {
+  const count = Number.parseInt(value || '0', 10);
+  return Number.isFinite(count) ? count : 0;
+}
+
+function getBestThumbnail(thumbnails = {}) {
+  return thumbnails.maxres?.url
+    || thumbnails.standard?.url
+    || thumbnails.high?.url
+    || thumbnails.medium?.url
+    || thumbnails.default?.url
+    || '';
+}
+
+async function fetchYoutubeJson(path, params, fetchImpl = fetch) {
+  const query = new URLSearchParams({ ...params, key: getApiKey() });
+  const response = await fetchImpl(`${API_BASE}/${path}?${query.toString()}`);
+  let data = null;
+
+  try {
+    data = await response.json();
+  } catch {
+    data = null;
+  }
+
+  if (!response.ok || data?.error) {
+    const message = data?.error?.message || `YouTube API 요청에 실패했습니다. (${response.status})`;
+    throw new Error(`YouTube API 오류 (${path}): ${message}`);
+  }
+
+  return data || {};
+}
+
+async function searchYoutubeVideos(options = {}, fetchImpl = fetch) {
+  const searchParams = {
+    part: 'snippet',
+    type: 'video',
+    q: options.query,
+    maxResults: String(options.maxResults || 25),
+    order: options.order || 'relevance',
+    safeSearch: 'moderate',
+  };
+
+  for (const key of [
+    'pageToken',
+    'publishedAfter',
+    'publishedBefore',
+    'regionCode',
+    'relevanceLanguage',
+    'videoDuration',
+  ]) {
+    if (options[key]) searchParams[key] = options[key];
+  }
+
+  const searchData = await fetchYoutubeJson('search', searchParams, fetchImpl);
+  const searchItems = Array.isArray(searchData.items) ? searchData.items : [];
+  const videoIds = searchItems.map((item) => item?.id?.videoId).filter(Boolean);
+  if (videoIds.length === 0) {
+    return {
+      items: [],
+      nextPageToken: searchData.nextPageToken || '',
+      prevPageToken: searchData.prevPageToken || '',
+      resultCount: 0,
+    };
+  }
+
+  const videoData = await fetchYoutubeJson('videos', {
+    part: 'snippet,statistics,contentDetails',
+    id: videoIds.join(','),
+  }, fetchImpl);
+  const videoMap = new Map((videoData.items || []).map((item) => [item.id, item]));
+  const channelIds = [...new Set((videoData.items || []).map((item) => item?.snippet?.channelId).filter(Boolean))];
+  const channelData = channelIds.length > 0
+    ? await fetchYoutubeJson('channels', {
+      part: 'snippet,statistics',
+      id: channelIds.join(','),
+    }, fetchImpl)
+    : { items: [] };
+  const channelMap = new Map((channelData.items || []).map((item) => [item.id, item]));
+  const now = Date.now();
+
+  const items = videoIds.map((videoId) => {
+    const video = videoMap.get(videoId);
+    if (!video) return null;
+    const channel = channelMap.get(video.snippet?.channelId) || {};
+    const duration = parseDuration(video.contentDetails?.duration);
+    const viewCount = toCount(video.statistics?.viewCount);
+    const subscriberCount = toCount(channel.statistics?.subscriberCount);
+    const publishedAt = video.snippet?.publishedAt || '';
+    const publishedTime = Date.parse(publishedAt);
+    const ageDays = Number.isFinite(publishedTime)
+      ? Math.max(1, Math.floor((now - publishedTime) / 86400000))
+      : 0;
+
+    return {
+      videoId,
+      title: video.snippet?.title || '',
+      description: video.snippet?.description || '',
+      thumbnail: getBestThumbnail(video.snippet?.thumbnails),
+      channelId: video.snippet?.channelId || '',
+      channelTitle: video.snippet?.channelTitle || channel.snippet?.title || '',
+      channelThumbnail: getBestThumbnail(channel.snippet?.thumbnails),
+      publishedAt,
+      duration: duration.formatted,
+      durationSeconds: duration.totalSeconds,
+      isShortsEstimate: duration.isShorts,
+      viewCount,
+      likeCount: toCount(video.statistics?.likeCount),
+      commentCount: toCount(video.statistics?.commentCount),
+      subscriberCount,
+      hiddenSubscriberCount: Boolean(channel.statistics?.hiddenSubscriberCount),
+      viralRatio: subscriberCount > 0 ? Math.round((viewCount / subscriberCount) * 100) : null,
+      lifetimeViewsPerDay: ageDays > 0 ? Math.round(viewCount / ageDays) : null,
+      ageDays,
+      url: `https://www.youtube.com/watch?v=${videoId}`,
+    };
+  }).filter(Boolean);
+
+  return {
+    items,
+    nextPageToken: searchData.nextPageToken || '',
+    prevPageToken: searchData.prevPageToken || '',
+    resultCount: items.length,
+  };
 }
 
 // 채널의 업로드 재생목록에서 영상 한 페이지(최대 50개)를 가져옴
@@ -154,4 +280,11 @@ async function fetchChannelInfo(rawInput) {
   };
 }
 
-module.exports = { parseDuration, fetchPlaylistPage, fetchVideoStatsBatch, fetchChannelInfo, parseChannelInput };
+module.exports = {
+  parseDuration,
+  fetchPlaylistPage,
+  fetchVideoStatsBatch,
+  fetchChannelInfo,
+  parseChannelInput,
+  searchYoutubeVideos,
+};
