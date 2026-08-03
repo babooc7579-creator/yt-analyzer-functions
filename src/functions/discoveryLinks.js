@@ -7,6 +7,8 @@ const DISCOVERY_LINK_DOC_TYPE = 'discovery_link';
 const DISCOVERY_LINK_STATUSES = new Set(['inbox', 'reviewing', 'saved', 'candidate', 'discarded']);
 const DISCOVERY_LINK_RIGHTS_STATUSES = new Set(['unknown', 'needs_check', 'cleared', 'do_not_use']);
 const DISCOVERY_LINK_PLATFORMS = new Set(['youtube', 'instagram', 'tiktok', 'web', 'unknown']);
+const MAX_DISCOVERY_LINK_TAGS = 10;
+const MAX_DISCOVERY_LINK_TAG_LENGTH = 40;
 
 function getUserId(request) {
   return request.query.get('userId') || DEFAULT_USER_ID;
@@ -26,6 +28,15 @@ function hasOwn(object, key) {
 
 function normalizeText(value) {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizeTags(value) {
+  if (!Array.isArray(value)) return [];
+
+  return [...new Set(value
+    .map(normalizeText)
+    .filter((tag) => tag && tag.length <= MAX_DISCOVERY_LINK_TAG_LENGTH))]
+    .slice(0, MAX_DISCOVERY_LINK_TAGS);
 }
 
 function normalizeUrl(rawUrl) {
@@ -88,6 +99,7 @@ function toDiscoveryLinkDocument(input, userId, now = new Date().toISOString()) 
     status: normalizeEnum(input?.status, DISCOVERY_LINK_STATUSES, 'inbox'),
     rightsStatus: normalizeEnum(input?.rightsStatus, DISCOVERY_LINK_RIGHTS_STATUSES, 'unknown'),
     linkedVideoId: normalizeText(input?.linkedVideoId),
+    tags: normalizeTags(input?.tags),
     createdAt: now,
     updatedAt: now,
   };
@@ -123,6 +135,9 @@ function applyDiscoveryLinkUpdates(existingDocument, updates = {}, now = new Dat
   }
   if (hasOwn(updates, 'linkedVideoId')) {
     document.linkedVideoId = normalizeText(updates.linkedVideoId);
+  }
+  if (hasOwn(updates, 'tags')) {
+    document.tags = normalizeTags(updates.tags);
   }
 
   document.updatedAt = now;
@@ -248,6 +263,7 @@ module.exports = {
   getPartitionKey,
   inferPlatform,
   normalizeUrl,
+  normalizeTags,
   toClientDiscoveryLink,
   toDiscoveryLinkDocument,
 };
