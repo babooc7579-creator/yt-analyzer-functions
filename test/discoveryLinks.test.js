@@ -4,6 +4,7 @@ const {
   applyDiscoveryLinkUpdates,
   getPartitionKey,
   inferPlatform,
+  normalizeTags,
   normalizeUrl,
   toClientDiscoveryLink,
   toDiscoveryLinkDocument,
@@ -38,6 +39,7 @@ const document = toDiscoveryLinkDocument(
     status: 'candidate',
     rightsStatus: 'needs_check',
     linkedVideoId: '  yt-1  ',
+    tags: [' 카이온학습 ', '카이온학습', '', '업무'],
   },
   'default',
   now
@@ -51,6 +53,7 @@ assert.strictEqual(document.memo, '군무 포인트', 'memo should be trimmed');
 assert.strictEqual(document.status, 'candidate', 'valid status should be preserved');
 assert.strictEqual(document.rightsStatus, 'needs_check', 'valid rightsStatus should be preserved');
 assert.strictEqual(document.linkedVideoId, 'yt-1', 'linkedVideoId should be trimmed');
+assert.deepStrictEqual(document.tags, ['카이온학습', '업무'], 'tags should be trimmed and deduped');
 assert.strictEqual(document.createdAt, now, 'createdAt should use the provided timestamp');
 assert.strictEqual(document.updatedAt, now, 'updatedAt should use the provided timestamp');
 assert.ok(document.id.startsWith('default:'), 'id should be scoped to userId');
@@ -69,6 +72,13 @@ const fallbackDocument = toDiscoveryLinkDocument(
 assert.strictEqual(fallbackDocument.platform, 'web', 'invalid platform should fall back to URL inference');
 assert.strictEqual(fallbackDocument.status, 'inbox', 'invalid status should fall back to inbox');
 assert.strictEqual(fallbackDocument.rightsStatus, 'unknown', 'invalid rightsStatus should fall back to unknown');
+assert.deepStrictEqual(fallbackDocument.tags, [], 'missing tags should use an empty list');
+
+assert.deepStrictEqual(
+  normalizeTags(['a', ' a ', '', 'b', 'x'.repeat(41)]),
+  ['a', 'b'],
+  'tags should exclude empty and overlong values'
+);
 
 const updatedDocument = applyDiscoveryLinkUpdates(
   document,
@@ -77,6 +87,7 @@ const updatedDocument = applyDiscoveryLinkUpdates(
     memo: '새 메모',
     status: 'saved',
     rightsStatus: 'cleared',
+    tags: ['카이온학습'],
   },
   '2026-07-02T01:00:00.000Z'
 );
@@ -86,6 +97,7 @@ assert.strictEqual(updatedDocument.platform, 'youtube', 'platform should be re-i
 assert.strictEqual(updatedDocument.memo, '새 메모', 'memo should update');
 assert.strictEqual(updatedDocument.status, 'saved', 'status should update');
 assert.strictEqual(updatedDocument.rightsStatus, 'cleared', 'rightsStatus should update');
+assert.deepStrictEqual(updatedDocument.tags, ['카이온학습'], 'tags should update');
 assert.strictEqual(updatedDocument.updatedAt, '2026-07-02T01:00:00.000Z', 'updatedAt should refresh');
 
 const clientDocument = toClientDiscoveryLink(document);
