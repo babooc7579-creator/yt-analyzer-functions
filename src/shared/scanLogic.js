@@ -8,7 +8,7 @@ const RECENT_DAYS_THRESHOLD = 90; // 최근 90일 이내 영상은 스캔할 때
 const OLD_REFRESH_INTERVAL_DAYS = 7; // 90일 이상 지난 영상은 7일에 한 번만 갱신
 const MAX_DEEP_FETCH_PAGES = 5; // 채널 최초 수집 시 최대 250개(50개 x 5페이지)까지 수집
 const TTOTTO_DAYS_THRESHOLD = 180; // '또터또' 후보 기준: 6개월 이상
-const TTOTTO_MULTIPLIER_THRESHOLD = 3; // '또터또' 후보 기준: 채널 평균 대비 3배 이상
+const TTOTTO_MULTIPLIER_THRESHOLD = 1.5; // '또터또' 후보 기준: 채널 평균 대비 1.5배 이상
 
 const ACTIVE_CHANNEL_STATUS = 'active';
 const VIDEO_DOC_TYPE = 'video';
@@ -20,6 +20,11 @@ function daysSince(dateStr) {
   const today = new Date();
   const target = new Date(dateStr);
   return Math.max(0, Math.floor((today - target) / (1000 * 60 * 60 * 24)));
+}
+
+function isTtoTtoCandidate(video = {}) {
+  return daysSince(video.uploadDate) >= TTOTTO_DAYS_THRESHOLD
+    && Number(video.multiplier || 0) >= TTOTTO_MULTIPLIER_THRESHOLD;
 }
 
 // 이 영상의 통계를 지금 갱신해야 하는지 판단
@@ -243,9 +248,7 @@ async function scanChannel(channel, scanMetadata = {}) {
   });
   await saveScanLog(channel, lastScanSummary, scanMetadata);
 
-  const ttoTtoCandidates = withMultiplier.filter(
-    (v) => daysSince(v.uploadDate) >= TTOTTO_DAYS_THRESHOLD && v.multiplier >= TTOTTO_MULTIPLIER_THRESHOLD
-  );
+  const ttoTtoCandidates = withMultiplier.filter(isTtoTtoCandidate);
 
   return {
     channelId: channel.id,
@@ -300,6 +303,7 @@ module.exports = {
   getChannelVideosFromDb,
   getExistingVideoIds,
   isChannelScannable,
+  isTtoTtoCandidate,
   needsStatsRefresh,
   refreshChannelMultipliers,
   runScan,

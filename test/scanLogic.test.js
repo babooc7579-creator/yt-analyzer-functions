@@ -1,5 +1,10 @@
 const assert = require('assert');
-const { daysSince, needsStatsRefresh, isChannelScannable } = require('../src/shared/scanLogic');
+const {
+  daysSince,
+  isChannelScannable,
+  isTtoTtoCandidate,
+  needsStatsRefresh,
+} = require('../src/shared/scanLogic');
 const { buildScanLogDocument, normalizeTrigger } = require('../src/shared/scanLogs');
 const { parsePageSize } = require('../src/functions/scanLogs');
 const { parseDuration, parseChannelInput } = require('../src/shared/youtube');
@@ -69,7 +74,25 @@ assert.strictEqual(isChannelScannable({ status: 'paused' }), false, 'paused chan
 assert.strictEqual(isChannelScannable({ status: 'discarded' }), false, 'discarded channels should not be scannable');
 console.log('channel status scan eligibility tests passed.');
 
-// 9. scan history documents preserve the latest summary without changing scan behavior
+// 9. scan completion and Creator OS must share the same tteotteotto threshold
+assert.strictEqual(
+  isTtoTtoCandidate({ uploadDate: daysAgo(180), multiplier: 1.5 }),
+  true,
+  '180일 이상이고 채널 평균 대비 1.5배인 영상은 또터또 후보여야 함',
+);
+assert.strictEqual(
+  isTtoTtoCandidate({ uploadDate: daysAgo(179), multiplier: 10 }),
+  false,
+  '180일보다 최근 영상은 배수가 높아도 또터또 후보가 아니어야 함',
+);
+assert.strictEqual(
+  isTtoTtoCandidate({ uploadDate: daysAgo(365), multiplier: 1.49 }),
+  false,
+  '채널 평균 대비 1.5배 미만 영상은 또터또 후보가 아니어야 함',
+);
+console.log('tteotteotto threshold alignment tests passed.');
+
+// 10. scan history documents preserve the latest summary without changing scan behavior
 const scanLog = buildScanLogDocument(
   { id: 'channel-1', title: '테스트 채널' },
   {
@@ -108,7 +131,7 @@ assert.deepStrictEqual(parsePageSize('200'), { pageSize: 200 }, 'scan log max pa
 assert.ok(parsePageSize('201').error, 'scan log page size above max must be rejected');
 console.log('scan history document and pagination tests passed.');
 
-// 10. manual historical backfill stays capped and preserves resumable progress
+// 11. manual historical backfill stays capped and preserves resumable progress
 assert.strictEqual(parseBackfillPageLimit(), 10, 'backfill should default to ten pages');
 assert.strictEqual(parseBackfillPageLimit(0), 1, 'backfill should fetch at least one page');
 assert.strictEqual(parseBackfillPageLimit(20), 10, 'backfill should never exceed ten pages');
