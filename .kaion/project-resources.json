@@ -16,7 +16,8 @@
     "youtube-data-api"
   ],
   "optionalResourceIds": [
-    "chatgpt-subscription"
+    "chatgpt-subscription",
+    "openai-api"
   ],
   "excludedScopes": [
     "kaion-homepage",
@@ -31,5 +32,19 @@
     "distinguishDatabaseReadFromApiCollection": true,
     "preserveSeparateBackfillState": true,
     "neverRecordSecrets": true
+  },
+  "aiUsagePolicy": {
+    "status": "planned-disabled-until-approved",
+    "approvedUseCases": [
+      "사용자가 선택한 저장 후보의 제목·구성·대본·설명 초안 생성"
+    ],
+    "apiPilotConstraints": {
+      "explicitUserAction": true,
+      "singleCandidateDefault": true,
+      "automaticRepeat": false,
+      "humanReviewRequired": true,
+      "separateFromYouTubeCollection": true,
+      "recordUsageAndEstimatedCost": true
+    }
   }
 }
