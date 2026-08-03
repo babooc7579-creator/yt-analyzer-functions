@@ -9,7 +9,7 @@ YouTube 채널 자동 스캔 백엔드 (Azure Functions, Node.js v4 모델)
 - `src/shared/scanLogic.js` - 핵심 스캔 로직 (신규 영상 감지 + 효율적 통계 갱신 정책)
 - `src/functions/scanTimer.js` - 매일 새벽 3시(KST) 자동 스캔
 - `src/functions/scanHttp.js` - 수동 스캔 트리거 (`POST/GET /api/scan`)
-- `src/functions/channels.js` - 채널 등록/조회/삭제 (`/api/channels`)
+- `src/functions/channels.js` - 채널 등록/조회/삭제 (`/api/channels`). 일괄 등록은 최대 50개를 10개씩 확인하며 기존 등록·중복 입력은 다시 저장하지 않고 영상 수집을 실행하지 않습니다.
 
 ## 갱신 정책 (API 호출 절약)
 
