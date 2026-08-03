@@ -2,6 +2,9 @@ const { app } = require('@azure/functions');
 const { getChannelsContainer } = require('../shared/cosmosClient');
 const { fetchChannelInfo } = require('../shared/youtube');
 
+const MAX_BULK_CHANNELS = 50;
+const BULK_CHANNEL_BATCH_SIZE = 10;
+
 function withChannelOperationalDefaults(channel, now = new Date().toISOString()) {
   const createdAt = channel.createdAt || now;
   return {
@@ -142,29 +145,73 @@ app.http('addChannel', {
   },
 });
 
-// POST /api/channels/bulk - 여러 채널 일괄 등록 { handles: string[], tags, language }
-app.http('bulkAddChannels', {
-  methods: ['POST'],
-  authLevel: 'anonymous',
-  route: 'channels/bulk',
-  handler: async (request, context) => {
-    try {
-      const body = await request.json();
-      const { handles, tags, language } = body;
-      if (!Array.isArray(handles) || handles.length === 0) {
-        return { status: 400, jsonBody: { success: false, error: 'handles 배열이 필요합니다.' } };
-      }
+function normalizeBulkChannelHandles(handles) {
+  if (!Array.isArray(handles)) return [];
+  return [...new Set(handles.map((handle) => String(handle || '').trim()).filter(Boolean))];
+}
 
-      const cleanTags = Array.isArray(tags) ? tags.map((t) => String(t).trim()).filter(Boolean) : [];
-      const category = cleanTags[0] || '미분류';
-      const container = getChannelsContainer();
-      const results = [];
+function chunkBulkChannelHandles(handles, size = BULK_CHANNEL_BATCH_SIZE) {
+  const chunks = [];
+  for (let index = 0; index < handles.length; index += size) {
+    chunks.push(handles.slice(index, index + size));
+  }
+  return chunks;
+}
 
-      for (const rawHandle of handles) {
-        const handle = rawHandle.trim();
-        if (!handle) continue;
+async function handleBulkAddChannels(request, context, dependencies = {}) {
+  try {
+    const body = await request.json();
+    if (!Array.isArray(body.handles)) {
+      return { status: 400, jsonBody: { success: false, error: 'handles 배열이 필요합니다.' } };
+    }
+
+    const handles = normalizeBulkChannelHandles(body.handles);
+    if (handles.length === 0) {
+      return { status: 400, jsonBody: { success: false, error: '등록할 채널을 한 개 이상 입력해 주세요.' } };
+    }
+    if (handles.length > MAX_BULK_CHANNELS) {
+      return { status: 400, jsonBody: { success: false, error: `채널은 한 번에 최대 ${MAX_BULK_CHANNELS}개까지 등록할 수 있습니다.` } };
+    }
+
+    const cleanTags = Array.isArray(body.tags) ? body.tags.map((tag) => String(tag).trim()).filter(Boolean) : [];
+    const category = cleanTags[0] || '미분류';
+    const container = dependencies.getContainer?.() || getChannelsContainer();
+    const lookupChannel = dependencies.fetchChannelInfo || fetchChannelInfo;
+    const { resources: storedChannels = [] } = await container.items.readAll().fetchAll();
+    const storedById = new Map(storedChannels.map((channel) => [String(channel.id), channel]));
+    const resolvedIds = new Set();
+    const results = [];
+    const batches = chunkBulkChannelHandles(handles);
+
+    for (const batch of batches) {
+      const resolvedBatch = await Promise.all(batch.map(async (handle) => {
         try {
-          const info = await fetchChannelInfo(handle);
+          const info = await lookupChannel(handle);
+          return { handle, info };
+        } catch (error) {
+          return { handle, error };
+        }
+      }));
+
+      for (const resolved of resolvedBatch) {
+        const { handle, info, error } = resolved;
+        if (error) {
+          results.push({ handle, success: false, status: 'failed', error: error.message });
+          continue;
+        }
+        const channelId = String(info.id || '');
+        const storedChannel = storedById.get(channelId);
+        if (resolvedIds.has(channelId)) {
+          results.push({ handle, success: true, status: 'duplicate', duplicate: true, channel: storedChannel || null });
+          continue;
+        }
+        if (storedChannel) {
+          results.push({ handle, success: true, status: 'existing', existing: true, channel: storedChannel });
+          continue;
+        }
+
+        resolvedIds.add(channelId);
+        try {
           const now = new Date().toISOString();
           const channelDoc = withChannelOperationalDefaults({
             id: info.id,
@@ -174,24 +221,49 @@ app.http('bulkAddChannels', {
             stats: info.stats,
             category,
             tags: cleanTags,
-            language: language || 'KR',
+            language: body.language || 'KR',
             notes: [],
             createdAt: now,
           }, now);
           await container.items.upsert(channelDoc);
-          results.push({ handle, success: true, channel: channelDoc });
-        } catch (err) {
-          results.push({ handle, success: false, error: err.message });
+          storedById.set(channelId, channelDoc);
+          results.push({ handle, success: true, status: 'added', existing: false, channel: channelDoc });
+        } catch (writeError) {
+          resolvedIds.delete(channelId);
+          results.push({ handle, success: false, status: 'failed', error: writeError.message });
         }
       }
-
-      const successCount = results.filter((r) => r.success).length;
-      return { jsonBody: { success: true, total: handles.length, added: successCount, results } };
-    } catch (err) {
-      context.error(`[일괄 추가] 오류: ${err.message}`);
-      return { status: 500, jsonBody: { success: false, error: err.message } };
     }
-  },
+
+    const added = results.filter((result) => result.status === 'added').length;
+    const existing = results.filter((result) => result.status === 'existing').length;
+    const duplicate = results.filter((result) => result.status === 'duplicate').length;
+    const failed = results.filter((result) => result.status === 'failed').length;
+    return {
+      jsonBody: {
+        success: true,
+        total: handles.length,
+        added,
+        existing,
+        duplicate,
+        failed,
+        batchSize: BULK_CHANNEL_BATCH_SIZE,
+        processedBatches: batches.length,
+        results,
+      },
+    };
+  } catch (err) {
+    context.error(`[일괄 추가] 오류: ${err.message}`);
+    return { status: 500, jsonBody: { success: false, error: err.message } };
+  }
+}
+
+// POST /api/channels/bulk - 최대 50개 채널을 10개 단위로 확인·등록 { handles: string[], tags, language }
+app.http('bulkAddChannels', {
+  methods: ['POST'],
+  authLevel: 'anonymous',
+  route: 'channels/bulk',
+  handler: handleBulkAddChannels,
 });
 
 // PATCH /api/channels/{id}?category=xxx - 채널 태그/언어 수정
@@ -308,3 +380,13 @@ app.http('addChannelNote', {
     }
   },
 });
+
+module.exports = {
+  BULK_CHANNEL_BATCH_SIZE,
+  MAX_BULK_CHANNELS,
+  applyChannelUpdates,
+  chunkBulkChannelHandles,
+  handleBulkAddChannels,
+  normalizeBulkChannelHandles,
+  withChannelOperationalDefaults,
+};
