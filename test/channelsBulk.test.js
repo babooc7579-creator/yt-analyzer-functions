@@ -5,6 +5,7 @@ const {
   MAX_BULK_CHANNELS,
   handleBulkAddChannels,
   normalizeBulkChannelHandles,
+  withChannelOperationalDefaults,
 } = require('../src/functions/channels');
 
 function makeRequest(body) {
@@ -29,6 +30,11 @@ function makeChannelInfo(handle) {
 async function run() {
   assert.strictEqual(MAX_BULK_CHANNELS, 50);
   assert.strictEqual(BULK_CHANNEL_BATCH_SIZE, 10);
+  assert.strictEqual(
+    withChannelOperationalDefaults({ id: 'new-channel' }).collectionMode,
+    'manual',
+    '새 채널 등록은 자동 수집 승인이 아니라 수동 수집 대기 상태여야 합니다.',
+  );
   assert.deepStrictEqual(
     normalizeBulkChannelHandles([' @one ', '', '@one', '@two']),
     ['@one', '@two'],

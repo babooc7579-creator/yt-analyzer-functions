@@ -4,7 +4,6 @@ const {
   getChannelTotalVideos,
   getExistingVideoIds,
   refreshChannelMultipliers,
-  upsertVideos,
 } = require('./scanLogic');
 const { fetchPlaylistPage } = require('./youtube');
 
@@ -124,7 +123,6 @@ async function backfillChannelHistory(channel, options = {}, dependencies = {}) 
     getExistingVideoIds: dependencies.getExistingVideoIds || getExistingVideoIds,
     refreshChannelMultipliers: dependencies.refreshChannelMultipliers || refreshChannelMultipliers,
     saveBackfillState: dependencies.saveBackfillState || saveBackfillState,
-    upsertVideos: dependencies.upsertVideos || upsertVideos,
   };
   const startedFromBeginning = !previousState.nextPageToken;
   let nextPageToken = previousState.nextPageToken || '';
@@ -153,10 +151,10 @@ async function backfillChannelHistory(channel, options = {}, dependencies = {}) 
 
   if (newStubs.length > 0) {
     await deps.applyStats(newStubs);
-    await deps.upsertVideos(newStubs);
   }
 
-  const allVideos = await deps.refreshChannelMultipliers(channel.id);
+  const multiplierRefresh = await deps.refreshChannelMultipliers(channel.id, newStubs);
+  const allVideos = Array.isArray(multiplierRefresh) ? multiplierRefresh : multiplierRefresh.videos;
   const updatedAt = new Date().toISOString();
   const backfillState = buildBackfillState(channel, {
     completed,

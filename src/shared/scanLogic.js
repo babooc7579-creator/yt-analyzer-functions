@@ -11,10 +11,32 @@ const TTOTTO_DAYS_THRESHOLD = 180; // '또터또' 후보 기준: 6개월 이상
 const TTOTTO_MULTIPLIER_THRESHOLD = 1.5; // '또터또' 후보 기준: 채널 평균 대비 1.5배 이상
 
 const ACTIVE_CHANNEL_STATUS = 'active';
+const AUTO_COLLECTION_MODE = 'auto';
 const VIDEO_DOC_TYPE = 'video';
 const isChannelScannable = (channel = {}) => (
   (channel.status || ACTIVE_CHANNEL_STATUS) === ACTIVE_CHANNEL_STATUS
 );
+const isChannelAutoScannable = (channel = {}) => (
+  isChannelScannable(channel) && channel.collectionMode === AUTO_COLLECTION_MODE
+);
+
+function selectChannelsForScan(allChannels = [], options = {}) {
+  const targetChannels = options.tag
+    ? allChannels.filter((channel) => Array.isArray(channel.tags) && channel.tags.includes(options.tag))
+    : allChannels;
+  const isTimerRun = options.trigger === 'timer';
+  return targetChannels.filter(isTimerRun ? isChannelAutoScannable : isChannelScannable);
+}
+
+function buildScanRunSummary(results = []) {
+  return results.reduce((total, result) => ({
+    channels: total.channels + 1,
+    failed: total.failed + (result.error ? 1 : 0),
+    newVideosFound: total.newVideosFound + (Number(result.newVideosFound) || 0),
+    statsRefreshed: total.statsRefreshed + (Number(result.statsRefreshed) || 0),
+    videosWritten: total.videosWritten + (Number(result.videosWritten) || 0),
+  }), { channels: 0, failed: 0, newVideosFound: 0, statsRefreshed: 0, videosWritten: 0 });
+}
 
 function daysSince(dateStr) {
   const today = new Date();
@@ -151,19 +173,42 @@ async function upsertVideos(videos) {
   }
 }
 
-async function refreshChannelMultipliers(channelId) {
-  const allVideos = await getChannelVideosFromDb(channelId);
-  const validViews = allVideos.filter((video) => video.viewCount > 0).map((video) => video.viewCount);
+function buildMultiplierRefreshPlan(existingVideos = [], pendingVideos = []) {
+  const existingById = new Map(existingVideos.map((video) => [video.id, video]));
+  const mergedById = new Map(existingVideos.map((video) => [video.id, video]));
+  for (const video of pendingVideos) {
+    mergedById.set(video.id, video);
+  }
+
+  const mergedVideos = [...mergedById.values()];
+  const validViews = mergedVideos.filter((video) => video.viewCount > 0).map((video) => video.viewCount);
   const avgViews = validViews.length > 0
     ? validViews.reduce((total, viewCount) => total + viewCount, 0) / validViews.length
     : 1;
-  const withMultiplier = allVideos.map((video) => ({
+  const withMultiplier = mergedVideos.map((video) => ({
     ...video,
     multiplier: Number(((Number(video.viewCount) || 0) / avgViews).toFixed(2)),
   }));
+  const pendingIds = new Set(pendingVideos.map((video) => video.id));
+  const videosToWrite = withMultiplier.filter((video) => {
+    const existing = existingById.get(video.id);
+    return pendingIds.has(video.id)
+      || !existing
+      || Number(existing.multiplier) !== video.multiplier;
+  });
 
-  await upsertVideos(withMultiplier);
-  return withMultiplier;
+  return { videos: withMultiplier, videosToWrite };
+}
+
+async function refreshChannelMultipliers(channelId, pendingVideos = []) {
+  const existingVideos = await getChannelVideosFromDb(channelId);
+  const plan = buildMultiplierRefreshPlan(existingVideos, pendingVideos);
+
+  await upsertVideos(plan.videosToWrite);
+  return {
+    videos: plan.videos,
+    writtenCount: plan.videosToWrite.length,
+  };
 }
 
 function getChannelTotalVideos(channel) {
@@ -223,12 +268,11 @@ async function scanChannel(channel, scanMetadata = {}) {
 
   if (toRefresh.length > 0) {
     await applyStats(toRefresh);
-    await upsertVideos(toRefresh);
   }
 
-  // 채널 평균 조회수를 다시 계산해서 '대박지수(multiplier)' 갱신
-  const withMultiplier = await refreshChannelMultipliers(channel.id);
-  const allVideos = withMultiplier;
+  // 통계 갱신분을 합쳐 '대박지수(multiplier)'를 계산하고, 변경된 영상만 한 번 저장
+  const multiplierRefresh = await refreshChannelMultipliers(channel.id, toRefresh);
+  const allVideos = multiplierRefresh.videos;
 
   const now = new Date().toISOString();
   const lastScanSummary = buildLastScanSummary(channel, {
@@ -248,7 +292,7 @@ async function scanChannel(channel, scanMetadata = {}) {
   });
   await saveScanLog(channel, lastScanSummary, scanMetadata);
 
-  const ttoTtoCandidates = withMultiplier.filter(isTtoTtoCandidate);
+  const ttoTtoCandidates = allVideos.filter(isTtoTtoCandidate);
 
   return {
     channelId: channel.id,
@@ -257,6 +301,7 @@ async function scanChannel(channel, scanMetadata = {}) {
     totalVideos: allVideos.length,
     newVideosFound: newStubs.length,
     statsRefreshed: toRefresh.length,
+    videosWritten: multiplierRefresh.writtenCount,
     stoppedAtLatestVideoId,
     ttoTtoCandidates: ttoTtoCandidates.map((v) => ({ id: v.id, title: v.title, multiplier: v.multiplier })),
   };
@@ -276,10 +321,7 @@ async function scanChannel(channel, scanMetadata = {}) {
 // 등록된 채널을 순서대로 스캔. options.tag가 있으면 해당 태그의 채널만 스캔
 async function runScan(options = {}) {
   const { resources: allChannels } = await getChannelsContainer().items.readAll().fetchAll();
-  const targetChannels = options.tag
-    ? allChannels.filter((c) => Array.isArray(c.tags) && c.tags.includes(options.tag))
-    : allChannels;
-  const channels = targetChannels.filter(isChannelScannable);
+  const channels = selectChannelsForScan(allChannels, options);
   const scanRunId = options.scanRunId || randomUUID();
 
   const results = [];
@@ -298,15 +340,19 @@ async function runScan(options = {}) {
 
 module.exports = {
   applyStats,
+  buildMultiplierRefreshPlan,
+  buildScanRunSummary,
   daysSince,
   getChannelTotalVideos,
   getChannelVideosFromDb,
   getExistingVideoIds,
+  isChannelAutoScannable,
   isChannelScannable,
   isTtoTtoCandidate,
   needsStatsRefresh,
   refreshChannelMultipliers,
   runScan,
   scanChannel,
+  selectChannelsForScan,
   upsertVideos,
 };
