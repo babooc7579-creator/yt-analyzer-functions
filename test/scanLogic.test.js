@@ -1,9 +1,13 @@
 const assert = require('assert');
 const {
+  buildMultiplierRefreshPlan,
+  buildScanRunSummary,
   daysSince,
+  isChannelAutoScannable,
   isChannelScannable,
   isTtoTtoCandidate,
   needsStatsRefresh,
+  selectChannelsForScan,
 } = require('../src/shared/scanLogic');
 const { buildScanLogDocument, normalizeTrigger } = require('../src/shared/scanLogs');
 const { parsePageSize } = require('../src/functions/scanLogs');
@@ -73,6 +77,63 @@ assert.strictEqual(isChannelScannable({ status: 'active' }), true, 'active chann
 assert.strictEqual(isChannelScannable({ status: 'paused' }), false, 'paused channels should not be scannable');
 assert.strictEqual(isChannelScannable({ status: 'discarded' }), false, 'discarded channels should not be scannable');
 console.log('channel status scan eligibility tests passed.');
+
+// 등록과 자동 수집 승인은 별개이며, timer만 collectionMode=auto를 요구한다.
+assert.strictEqual(isChannelAutoScannable({ status: 'active', collectionMode: 'manual' }), false);
+assert.strictEqual(isChannelAutoScannable({ status: 'active', collectionMode: 'auto' }), true);
+assert.strictEqual(isChannelAutoScannable({ status: 'paused', collectionMode: 'auto' }), false);
+const scanChannels = [
+  { id: 'manual', status: 'active', collectionMode: 'manual', tags: ['중요'] },
+  { id: 'auto', status: 'active', collectionMode: 'auto', tags: ['중요'] },
+  { id: 'paused-auto', status: 'paused', collectionMode: 'auto', tags: ['중요'] },
+];
+assert.deepStrictEqual(
+  selectChannelsForScan(scanChannels, { trigger: 'timer' }).map((channel) => channel.id),
+  ['auto'],
+  '야간 자동 수집은 명시적으로 auto인 활성 채널만 실행해야 합니다.',
+);
+assert.deepStrictEqual(
+  selectChannelsForScan(scanChannels, { trigger: 'manual_tag', tag: '중요' }).map((channel) => channel.id),
+  ['manual', 'auto'],
+  '사용자가 실행한 수동 수집은 collectionMode와 관계없이 활성 채널을 처리해야 합니다.',
+);
+console.log('automatic collection boundary tests passed.');
+
+// 통계 갱신 영상은 multiplier까지 합쳐 한 번만 저장하고, 값이 같은 기존 영상은 건너뛴다.
+const multiplierPlan = buildMultiplierRefreshPlan(
+  [
+    { id: 'unchanged', viewCount: 100, multiplier: 0.67 },
+    { id: 'refreshed', viewCount: 200, multiplier: 1.33, lastStatsRefreshAt: 'old' },
+  ],
+  [{ id: 'refreshed', viewCount: 200, multiplier: 1.33, lastStatsRefreshAt: 'new' }],
+);
+assert.deepStrictEqual(
+  multiplierPlan.videosToWrite.map((video) => video.id),
+  ['refreshed'],
+  '통계 갱신 영상만 한 번 저장하고 multiplier가 같은 기존 영상은 다시 저장하지 않아야 합니다.',
+);
+const changedAveragePlan = buildMultiplierRefreshPlan(
+  [
+    { id: 'existing', viewCount: 100, multiplier: 1 },
+  ],
+  [{ id: 'new', viewCount: 300 }],
+);
+assert.deepStrictEqual(
+  changedAveragePlan.videosToWrite.map((video) => video.id).sort(),
+  ['existing', 'new'],
+  '평균 변경으로 multiplier가 달라진 기존 영상과 신규 영상만 저장해야 합니다.',
+);
+console.log('multiplier write reduction tests passed.');
+
+assert.deepStrictEqual(
+  buildScanRunSummary([
+    { newVideosFound: 3, statsRefreshed: 5, videosWritten: 7 },
+    { error: 'quota', newVideosFound: 0 },
+  ]),
+  { channels: 2, failed: 1, newVideosFound: 3, statsRefreshed: 5, videosWritten: 7 },
+  '자동 실행 로그는 영상 상세 대신 운영 건수만 작게 남겨야 합니다.',
+);
+console.log('scan run summary tests passed.');
 
 // 9. scan completion and Creator OS must share the same tteotteotto threshold
 assert.strictEqual(
@@ -183,6 +244,7 @@ assert.strictEqual(nextBackfillState.lastRun.estimatedMissingVideos, 160, 'remai
 
 (async () => {
   const savedStates = [];
+  let multiplierPendingVideos = [];
   const result = await backfillChannelHistory(
     {
       id: 'channel-1',
@@ -225,8 +287,10 @@ assert.strictEqual(nextBackfillState.lastRun.estimatedMissingVideos, 160, 'remai
       ),
       getExistingVideoIds: async () => new Set(['video-1']),
       applyStats: async (videos) => videos.map((video) => Object.assign(video, { viewCount: 10 })),
-      upsertVideos: async () => {},
-      refreshChannelMultipliers: async () => [{ id: 'video-1' }, { id: 'video-2' }, { id: 'video-3' }],
+      refreshChannelMultipliers: async (_channelId, pendingVideos) => {
+        multiplierPendingVideos = pendingVideos;
+        return { videos: [{ id: 'video-1' }, { id: 'video-2' }, { id: 'video-3' }], writtenCount: 2 };
+      },
       saveBackfillState: async (_channel, state) => savedStates.push(state),
     },
   );
@@ -234,6 +298,11 @@ assert.strictEqual(nextBackfillState.lastRun.estimatedMissingVideos, 160, 'remai
   assert.strictEqual(result.pagesFetched, 2, 'manual backfill should respect the requested page cap');
   assert.strictEqual(result.inspectedVideos, 3, 'manual backfill should report inspected videos');
   assert.strictEqual(result.savedVideosThisRun, 2, 'existing videos should not be saved again');
+  assert.deepStrictEqual(
+    multiplierPendingVideos.map((video) => video.id),
+    ['video-2', 'video-3'],
+    '과거 영상 채우기도 신규 통계와 multiplier를 한 번의 저장 단계로 전달해야 합니다.',
+  );
   assert.strictEqual(result.completed, true, 'missing next token should complete the backfill');
   assert.strictEqual(result.inspectionProgressRate, 100, 'playlist exhaustion should report complete inspection');
   assert.strictEqual(savedStates[0].nextPageToken, null, 'completed backfill should clear its cursor');
